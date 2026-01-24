@@ -1,0 +1,208 @@
+# .gitignore File
+
+Copy this into `.gitignore`:
+
+```
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.sublime-workspace
+.sublime-project
+
+# Build and Distribution
+dist/
+build/
+.cache/
+coverage/
+.nyc_output/
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Testing
+.jest/
+```
+
+---
+
+# render.yaml File
+
+Copy this into `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: arbitrage-scanner
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      - key: PORT
+        value: 3000
+      
+      - key: ARBITRUM_RPC
+        sync: false
+      
+      - key: POLYGON_RPC
+        sync: false
+      
+      - key: MIN_LIQUIDITY_USD
+        value: 50000
+      
+      - key: LOG_LEVEL
+        value: info
+
+    autoDeploy: true
+```
+
+---
+
+# What Each File Does:
+
+## `.gitignore`
+This tells Git which files **NOT** to track or upload to GitHub. Key sections:
+
+1. **node_modules/** - Don't upload dependencies (they're huge!)
+2. **.env** - Don't upload your API keys (security!)
+3. **logs/** - Don't upload log files
+4. **.DS_Store** - Don't upload Mac system files
+5. **build/** - Don't upload compiled files
+
+## `render.yaml`
+This tells Render how to deploy your app. Key settings:
+
+1. **name** - Your app name on Render
+2. **env: node** - Use Node.js environment
+3. **region: oregon** - Server location (you can change this)
+4. **plan: starter** - Free or paid plan
+5. **buildCommand** - What to run when building (`npm install`)
+6. **startCommand** - What to run to start app (`npm start`)
+7. **healthCheckPath** - How Render checks if app is alive (`/health`)
+8. **envVars** - Environment variables needed
+9. **autoDeploy: true** - Auto-deploy when you push to GitHub
+
+---
+
+# How to Use:
+
+## Create the files:
+
+```bash
+# In your project root
+touch .gitignore
+touch render.yaml
+
+# Copy the content above into each file
+```
+
+## Important: Environment Variables on Render
+
+When you deploy to Render, you'll need to add these environment variables in the Render dashboard:
+
+1. **ARBITRUM_RPC** - Your Alchemy/Infura Arbitrum RPC URL
+2. **POLYGON_RPC** - Your Alchemy/Infura Polygon RPC URL
+
+Go to: Render Dashboard → Your Service → Environment → Add Environment Variable
+
+Example:
+```
+ARBITRUM_RPC = https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY_HERE
+POLYGON_RPC = https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY_HERE
+```
+
+---
+
+# Alternative render.yaml (Minimal)
+
+If you want a simpler version:
+
+```yaml
+services:
+  - type: web
+    name: arbitrage-scanner
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ARBITRUM_RPC
+        sync: false
+      - key: POLYGON_RPC
+        sync: false
+```
+
+---
+
+# Render Regions Available:
+
+You can change `region: oregon` to:
+- `oregon` (US West)
+- `ohio` (US East)
+- `frankfurt` (Europe)
+- `singapore` (Asia)
+
+Choose the region closest to your users for best performance!
+
+---
+
+# Render Plans:
+
+Change `plan: starter` to:
+- `free` - Free tier (app sleeps after 15 min inactivity)
+- `starter` - $7/month (always on)
+- `standard` - $25/month (better performance)
+- `pro` - $85/month (dedicated resources)
+
+For this scanner, **starter** is recommended (always on, fast enough).
