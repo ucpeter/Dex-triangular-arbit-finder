@@ -1,9 +1,10 @@
 // server.js - Part 1 of 2
-// Real-time Uniswap V3 Arbitrage Scanner
+// Real-time Uniswap V3 Arbitrage Scanner with Gas Calculation
 
 const express = require('express');
 const cors = require('cors');
 const { ethers } = require('ethers');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -165,6 +166,20 @@ const FACTORY_ABI = [
   'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)'
 ];
 
+// Gas price estimates
+const GAS_ESTIMATES = {
+  arbitrum: {
+    swapGasLimit: 180000,
+    swapsPerArbitrage: 3,
+    averageGasPrice: 0.1
+  },
+  polygon: {
+    swapGasLimit: 180000,
+    swapsPerArbitrage: 3,
+    averageGasPrice: 30
+  }
+};
+
 const providers = {};
 for (const [network, config] of Object.entries(NETWORKS)) {
   providers[network] = new ethers.JsonRpcProvider(config.rpc);
@@ -182,6 +197,34 @@ function getPool(network, poolAddress) {
   return new ethers.Contract(poolAddress, POOL_ABI, providers[network]);
 }
 
+async function getCurrentGasPrice(network) {
+  try {
+    const feeData = await providers[network].getFeeData();
+    const gasPriceGwei = parseFloat(ethers.formatUnits(feeData.gasPrice || 0n, 'gwei'));
+    return gasPriceGwei;
+  } catch (error) {
+    console.log(`Using default gas price for ${network}`);
+    return GAS_ESTIMATES[network].averageGasPrice;
+  }
+}
+
+async function calculateGasCost(network, ethPriceUSD = 3200) {
+  const gasPrice = await getCurrentGasPrice(network);
+  const gasLimit = GAS_ESTIMATES[network].swapGasLimit * GAS_ESTIMATES[network].swapsPerArbitrage;
+  
+  const gasCostETH = (gasLimit * gasPrice) / 1e9;
+  const gasCostUSD = gasCostETH * ethPriceUSD;
+  
+  return {
+    gasPrice: gasPrice,
+    gasLimit: gasLimit,
+    gasCostETH: gasCostETH,
+    gasCostUSD: gasCostUSD
+  };
+}
+
+// server.js - Part 2 of 2
+// Continue from Part 1 - Add this after calculateGasCost function
 
 async function checkPoolLiquidity(network, tokenIn, tokenOut, fee) {
   try {
@@ -239,8 +282,10 @@ async function getQuote(network, tokenIn, tokenOut, amountIn, fee, checkLiquidit
   }
 }
 
-async function calculateArbitrage(network, path, amount, minLiquidityCheck = true) {
+async function calculateArbitrage(network, path, amount, minLiquidityCheck = true, gasCost = null) {
   const [tokenA, tokenB, tokenC] = path;
+  
+  console.log(`   Checking: ${tokenA} → ${tokenB} → ${tokenC} → ${tokenA}`);
   
   let bestProfit = -Infinity;
   let bestResult = null;
@@ -261,6 +306,9 @@ async function calculateArbitrage(network, path, amount, minLiquidityCheck = tru
           const profit = amountFinal - amount;
           const profitPercent = (profit / amount) * 100;
           
+          const netProfit = gasCost ? profit - gasCost.gasCostUSD : profit;
+          const netProfitPercent = gasCost ? (netProfit / amount) * 100 : profitPercent;
+          
           if (profitPercent > bestProfit) {
             bestProfit = profitPercent;
             bestResult = {
@@ -269,6 +317,15 @@ async function calculateArbitrage(network, path, amount, minLiquidityCheck = tru
               outputAmount: amountFinal,
               profit: profit,
               profitPercent: profitPercent,
+              gasCost: gasCost ? gasCost.gasCostUSD : 0,
+              netProfit: netProfit,
+              netProfitPercent: netProfitPercent,
+              gasDetails: gasCost ? {
+                gasPrice: gasCost.gasPrice.toFixed(2),
+                gasLimit: gasCost.gasLimit,
+                gasCostETH: gasCost.gasCostETH.toFixed(6),
+                gasCostUSD: gasCost.gasCostUSD.toFixed(2)
+              } : null,
               fees: [fee1, fee2, fee3],
               feesPercent: [(fee1/10000), (fee2/10000), (fee3/10000)],
               network: network,
@@ -347,41 +404,94 @@ app.post('/scan', async (req, res) => {
     const opportunities = [];
     const limit = Math.min(maxPaths || 50, paths.length);
     
-    console.log(`Scanning ${limit} paths on ${network} with ${amount} input amount...`);
-    console.log(`Liquidity check: ${checkLiquidity ? 'enabled' : 'disabled'}`);
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`🚀 STARTING ARBITRAGE SCAN`);
+    console.log(`${'='.repeat(70)}`);
+    console.log(`Network: ${NETWORKS[network].name}`);
+    console.log(`Input Amount: $${amount}`);
+    console.log(`Min Profit: ${minProfit}%`);
+    console.log(`Liquidity Check: ${checkLiquidity ? 'Enabled ✓' : 'Disabled ✗'}`);
+    console.log(`Paths to Scan: ${limit} of ${paths.length} total`);
+    console.log(`${'='.repeat(70)}\n`);
+    
+    console.log('⛽ Fetching current gas prices...');
+    const gasCost = await calculateGasCost(network);
+    console.log(`   Gas Price: ${gasCost.gasPrice.toFixed(2)} GWEI`);
+    console.log(`   Gas Limit: ${gasCost.gasLimit.toLocaleString()} units`);
+    console.log(`   Gas Cost: $${gasCost.gasCostUSD.toFixed(2)} (${gasCost.gasCostETH.toFixed(6)} ETH)`);
+    console.log(`${'='.repeat(70)}\n`);
     
     let scannedCount = 0;
     
     for (let i = 0; i < limit; i++) {
-      const result = await calculateArbitrage(network, paths[i], amount, checkLiquidity);
+      console.log(`\n[${i + 1}/${limit}]`);
+      const result = await calculateArbitrage(network, paths[i], amount, checkLiquidity, gasCost);
       scannedCount++;
       
-      if (result && result.profitPercent >= minProfit) {
+      if (result && result.netProfitPercent >= minProfit) {
         opportunities.push(result);
-        console.log(`✓ Found: ${result.path} - ${result.profitPercent.toFixed(3)}%`);
+        console.log(`\n   ✅ PROFITABLE OPPORTUNITY FOUND!`);
+        console.log(`   ${'─'.repeat(66)}`);
+        console.log(`   Path: ${result.path}`);
+        console.log(`   Gross Profit: $${result.profit.toFixed(2)} (+${result.profitPercent.toFixed(3)}%)`);
+        console.log(`   Gas Cost: -$${result.gasCost.toFixed(2)}`);
+        console.log(`   Net Profit: $${result.netProfit.toFixed(2)} (+${result.netProfitPercent.toFixed(3)}%)`);
+        console.log(`   Pool Fees: ${result.feesPercent.map(f => f.toFixed(2) + '%').join(' → ')}`);
+        console.log(`   ${'─'.repeat(66)}\n`);
       }
       
       if ((scannedCount) % 10 === 0) {
-        console.log(`Progress: ${scannedCount}/${limit} paths scanned, ${opportunities.length} profitable`);
+        console.log(`\n${'─'.repeat(70)}`);
+        console.log(`📊 Progress Update: ${scannedCount}/${limit} paths scanned`);
+        console.log(`💰 Profitable Found: ${opportunities.length}`);
+        if (opportunities.length > 0) {
+          console.log(`🏆 Best Net Profit: +${Math.max(...opportunities.map(o => o.netProfitPercent)).toFixed(3)}%`);
+        }
+        console.log(`${'─'.repeat(70)}\n`);
       }
     }
     
-    opportunities.sort((a, b) => b.profitPercent - a.profitPercent);
+    opportunities.sort((a, b) => b.netProfitPercent - a.netProfitPercent);
+    
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`✨ SCAN COMPLETE`);
+    console.log(`${'='.repeat(70)}`);
+    console.log(`Total Paths Scanned: ${scannedCount}`);
+    console.log(`Profitable Opportunities: ${opportunities.length}`);
+    if (opportunities.length > 0) {
+      console.log(`Best Gross Profit: +${opportunities[0].profitPercent.toFixed(3)}%`);
+      console.log(`Best Net Profit: +${opportunities[0].netProfitPercent.toFixed(3)}%`);
+      console.log(`\nTop 3 Opportunities:`);
+      opportunities.slice(0, 3).forEach((opp, idx) => {
+        console.log(`  ${idx + 1}. ${opp.path}`);
+        console.log(`     Net: $${opp.netProfit.toFixed(2)} (+${opp.netProfitPercent.toFixed(3)}%)`);
+      });
+    } else {
+      console.log(`No profitable opportunities found with current parameters.`);
+      console.log(`Try: Lower min profit, increase input amount, or disable liquidity check.`);
+    }
+    console.log(`${'='.repeat(70)}\n`);
     
     res.json({
       success: true,
       network: NETWORKS[network].name,
       scanned: scannedCount,
       opportunities: opportunities.slice(0, 20),
+      gasCost: {
+        gasPrice: gasCost.gasPrice.toFixed(2),
+        gasCostUSD: gasCost.gasCostUSD.toFixed(2),
+        gasCostETH: gasCost.gasCostETH.toFixed(6)
+      },
       stats: {
         total: opportunities.length,
         bestProfit: opportunities[0]?.profitPercent || 0,
+        bestNetProfit: opportunities[0]?.netProfitPercent || 0,
         totalPaths: paths.length
       }
     });
     
   } catch (error) {
-    console.error('Scan error:', error);
+    console.error('❌ Scan error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -410,7 +520,7 @@ const io = require('socket.io')(server, {
 const activeScans = new Map();
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('🔌 Client connected:', socket.id);
   
   socket.on('startScan', async (config) => {
     const { network, amount, minProfit, checkLiquidity = true } = config;
@@ -422,24 +532,25 @@ io.on('connection', (socket) => {
     const scanState = { stop: false };
     activeScans.set(socket.id, scanState);
     
-    console.log(`Starting continuous scan for ${socket.id} on ${network}`);
+    console.log(`🔄 Starting continuous scan for ${socket.id} on ${network}`);
     
     const runScan = async () => {
       if (scanState.stop) return;
       
       try {
         const paths = generatePaths(network);
+        const gasCost = await calculateGasCost(network);
         const batchSize = 10;
         
         for (let i = 0; i < paths.length && !scanState.stop; i += batchSize) {
           const batch = paths.slice(i, i + batchSize);
           
           const results = await Promise.all(
-            batch.map(path => calculateArbitrage(network, path, amount, checkLiquidity))
+            batch.map(path => calculateArbitrage(network, path, amount, checkLiquidity, gasCost))
           );
           
           for (const result of results) {
-            if (result && result.profitPercent >= minProfit) {
+            if (result && result.netProfitPercent >= minProfit) {
               socket.emit('opportunity', result);
             }
           }
@@ -469,7 +580,7 @@ io.on('connection', (socket) => {
     if (activeScans.has(socket.id)) {
       activeScans.get(socket.id).stop = true;
       activeScans.delete(socket.id);
-      console.log(`Stopped scan for ${socket.id}`);
+      console.log(`⏹️  Stopped scan for ${socket.id}`);
     }
   });
   
@@ -478,34 +589,38 @@ io.on('connection', (socket) => {
       activeScans.get(socket.id).stop = true;
       activeScans.delete(socket.id);
     }
-    console.log('Client disconnected:', socket.id);
+    console.log('🔌 Client disconnected:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`
-╔════════════════════════════════════════════════════════════╗
-║   Uniswap V3 Triangular Arbitrage Scanner                  ║
-║   Running on port ${PORT}                                     ║
-╚════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════╗
+║                                                                ║
+║   🚀 Uniswap V3 Triangular Arbitrage Scanner                  ║
+║   💎 With Real-Time Gas Cost Calculation                      ║
+║                                                                ║
+║   Running on port ${PORT}                                        ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
 
-Networks Available:
-  • Arbitrum (${Object.keys(NETWORKS.arbitrum.tokens).length} tokens)
-  • Polygon (${Object.keys(NETWORKS.polygon.tokens).length} tokens)
+📊 Networks Available:
+   • Arbitrum (${Object.keys(NETWORKS.arbitrum.tokens).length} tokens)
+   • Polygon (${Object.keys(NETWORKS.polygon.tokens).length} tokens)
 
-Fee Tiers: ${POOL_FEES.map(f => (f/10000) + '%').join(', ')}
+💰 Fee Tiers: ${POOL_FEES.map(f => (f/10000) + '%').join(', ')}
 
-Endpoints:
-  GET  /health
-  GET  /tokens/:network
-  POST /scan
-  POST /check-liquidity
+📡 API Endpoints:
+   GET  /health              - Server health check
+   GET  /tokens/:network     - Get token list
+   POST /scan                - Scan for arbitrage
+   POST /check-liquidity     - Check pool liquidity
 
-WebSocket: ws://localhost:${PORT}
+🔌 WebSocket: ws://localhost:${PORT}
 
-Frontend: http://localhost:${PORT}
+🌐 Frontend: http://localhost:${PORT}
 
-Ready to scan for arbitrage opportunities! 🚀
+✅ Ready to scan for arbitrage opportunities!
   `);
 });
