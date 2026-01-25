@@ -1,5 +1,5 @@
-// server.js - Part 1 of 2
-// Real-time Uniswap V3 Arbitrage Scanner with Gas Calculation
+// server.js - Part 1 of 2 (FINAL VERSION)
+// Real-time Uniswap V3 Arbitrage Scanner with Gas Calculation & Diverse Path Selection
 
 const express = require('express');
 const cors = require('cors');
@@ -166,7 +166,6 @@ const FACTORY_ABI = [
   'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)'
 ];
 
-// Gas price estimates
 const GAS_ESTIMATES = {
   arbitrum: {
     swapGasLimit: 180000,
@@ -223,7 +222,7 @@ async function calculateGasCost(network, ethPriceUSD = 3200) {
   };
 }
 
-// server.js - Part 2 of 2
+// server.js - Part 2 of 2 (FINAL VERSION)
 // Continue from Part 1 - Add this after calculateGasCost function
 
 async function checkPoolLiquidity(network, tokenIn, tokenOut, fee) {
@@ -348,22 +347,30 @@ async function calculateArbitrage(network, path, amount, minLiquidityCheck = tru
   return bestResult;
 }
 
+// FIXED: Randomized path generation to avoid scanning same tokens
 function generatePaths(network) {
   const tokens = Object.keys(NETWORKS[network].tokens);
-  const paths = [];
+  const allPaths = [];
   
+  // Generate ALL possible triangular paths
   for (let i = 0; i < tokens.length; i++) {
     for (let j = 0; j < tokens.length; j++) {
       if (i === j) continue;
       for (let k = 0; k < tokens.length; k++) {
         if (k === i || k === j) continue;
-        paths.push([tokens[i], tokens[j], tokens[k]]);
+        allPaths.push([tokens[i], tokens[j], tokens[k]]);
       }
     }
   }
   
-  console.log(`Generated ${paths.length} triangular paths for ${network}`);
-  return paths;
+  // Shuffle array to randomize path selection
+  for (let i = allPaths.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allPaths[i], allPaths[j]] = [allPaths[j], allPaths[i]];
+  }
+  
+  console.log(`Generated ${allPaths.length} triangular paths for ${network} (randomized)`);
+  return allPaths;
 }
 
 // API Endpoints
@@ -400,9 +407,17 @@ app.post('/scan', async (req, res) => {
   }
   
   try {
-    const paths = generatePaths(network);
+    const allPaths = generatePaths(network);
     const opportunities = [];
-    const limit = Math.min(maxPaths || 50, paths.length);
+    const limit = Math.min(maxPaths || 50, allPaths.length);
+    
+    // Select diverse paths spread across the array
+    const selectedPaths = [];
+    const step = Math.floor(allPaths.length / limit);
+    for (let i = 0; i < limit; i++) {
+      const index = (i * step + Math.floor(Math.random() * step)) % allPaths.length;
+      selectedPaths.push(allPaths[index]);
+    }
     
     console.log(`\n${'='.repeat(70)}`);
     console.log(`🚀 STARTING ARBITRAGE SCAN`);
@@ -411,7 +426,7 @@ app.post('/scan', async (req, res) => {
     console.log(`Input Amount: $${amount}`);
     console.log(`Min Profit: ${minProfit}%`);
     console.log(`Liquidity Check: ${checkLiquidity ? 'Enabled ✓' : 'Disabled ✗'}`);
-    console.log(`Paths to Scan: ${limit} of ${paths.length} total`);
+    console.log(`Paths to Scan: ${limit} of ${allPaths.length} total (randomized)`);
     console.log(`${'='.repeat(70)}\n`);
     
     console.log('⛽ Fetching current gas prices...');
@@ -422,10 +437,21 @@ app.post('/scan', async (req, res) => {
     console.log(`${'='.repeat(70)}\n`);
     
     let scannedCount = 0;
+    const scannedPaths = new Set();
     
-    for (let i = 0; i < limit; i++) {
+    for (let i = 0; i < selectedPaths.length; i++) {
+      const path = selectedPaths[i];
+      const pathKey = path.join('-');
+      
+      if (scannedPaths.has(pathKey)) {
+        console.log(`   ⏩ Skipping duplicate: ${path.join(' → ')}`);
+        continue;
+      }
+      
+      scannedPaths.add(pathKey);
       console.log(`\n[${i + 1}/${limit}]`);
-      const result = await calculateArbitrage(network, paths[i], amount, checkLiquidity, gasCost);
+      
+      const result = await calculateArbitrage(network, path, amount, checkLiquidity, gasCost);
       scannedCount++;
       
       if (result && result.netProfitPercent >= minProfit) {
@@ -461,14 +487,20 @@ app.post('/scan', async (req, res) => {
     if (opportunities.length > 0) {
       console.log(`Best Gross Profit: +${opportunities[0].profitPercent.toFixed(3)}%`);
       console.log(`Best Net Profit: +${opportunities[0].netProfitPercent.toFixed(3)}%`);
-      console.log(`\nTop 3 Opportunities:`);
-      opportunities.slice(0, 3).forEach((opp, idx) => {
+      console.log(`\n🎯 Top 5 Opportunities:`);
+      opportunities.slice(0, 5).forEach((opp, idx) => {
         console.log(`  ${idx + 1}. ${opp.path}`);
+        console.log(`     Gross: $${opp.profit.toFixed(2)} (+${opp.profitPercent.toFixed(3)}%)`);
+        console.log(`     Gas: -$${opp.gasCost.toFixed(2)}`);
         console.log(`     Net: $${opp.netProfit.toFixed(2)} (+${opp.netProfitPercent.toFixed(3)}%)`);
       });
     } else {
       console.log(`No profitable opportunities found with current parameters.`);
-      console.log(`Try: Lower min profit, increase input amount, or disable liquidity check.`);
+      console.log(`\n💡 Suggestions:`);
+      console.log(`   • Lower min profit to 0.1% or 0.2%`);
+      console.log(`   • Increase input amount to $5000 or $10000`);
+      console.log(`   • Try scanning more paths (increase maxPaths to 100+)`);
+      console.log(`   • Disable liquidity check temporarily`);
     }
     console.log(`${'='.repeat(70)}\n`);
     
@@ -486,7 +518,7 @@ app.post('/scan', async (req, res) => {
         total: opportunities.length,
         bestProfit: opportunities[0]?.profitPercent || 0,
         bestNetProfit: opportunities[0]?.netProfitPercent || 0,
-        totalPaths: paths.length
+        totalPaths: allPaths.length
       }
     });
     
@@ -599,7 +631,7 @@ server.listen(PORT, () => {
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
 ║   🚀 Uniswap V3 Triangular Arbitrage Scanner                  ║
-║   💎 With Real-Time Gas Cost Calculation                      ║
+║   💎 With Gas Calculation & Diverse Path Selection            ║
 ║                                                                ║
 ║   Running on port ${PORT}                                        ║
 ║                                                                ║
@@ -622,5 +654,6 @@ server.listen(PORT, () => {
 🌐 Frontend: http://localhost:${PORT}
 
 ✅ Ready to scan for arbitrage opportunities!
+✨ Now with randomized diverse path selection!
   `);
 });
