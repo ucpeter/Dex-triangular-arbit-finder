@@ -1,5 +1,5 @@
-// server.js - Part 1 of 2 (FINAL VERSION)
-// Real-time Uniswap V3 Arbitrage Scanner with Gas Calculation & Diverse Path Selection
+// server.js - Part 1 of 2 (UPDATED VERSION)
+// Real-time Uniswap V3 Arbitrage Scanner with Progressive Path Scanning
 
 const express = require('express');
 const cors = require('cors');
@@ -23,6 +23,8 @@ const NETWORKS = {
     rpc: process.env.ARBITRUM_RPC || 'https://arb1.arbitrum.io/rpc',
     quoter: '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6',
     factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+    nativeToken: 'ETH',
+    nativeTokenPrice: 3200, // USD price of ETH
     tokens: {
       '1INCH': { address: '0x5438107231c501f4929a5e2e3155e2665a9a8f7b', decimals: 18 },
       'AAVE': { address: '0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9', decimals: 18 },
@@ -92,6 +94,8 @@ const NETWORKS = {
     rpc: process.env.POLYGON_RPC || 'https://polygon-rpc.com',
     quoter: '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6',
     factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+    nativeToken: 'MATIC',
+    nativeTokenPrice: 0.40, // USD price of MATIC
     tokens: {
       '1INCH': { address: '0x111111111117dc0aa78b770fa6a738034120c302', decimals: 18 },
       'AAVE': { address: '0xd6df932a45c0f255f85145f286ea0b292b21c90b', decimals: 18 },
@@ -179,6 +183,22 @@ const GAS_ESTIMATES = {
   }
 };
 
+// Global path tracking state
+const pathTracking = {
+  arbitrum: {
+    allPaths: [],
+    scannedPaths: new Set(),
+    currentBatchIndex: 0,
+    totalScanned: 0
+  },
+  polygon: {
+    allPaths: [],
+    scannedPaths: new Set(),
+    currentBatchIndex: 0,
+    totalScanned: 0
+  }
+};
+
 const providers = {};
 for (const [network, config] of Object.entries(NETWORKS)) {
   providers[network] = new ethers.JsonRpcProvider(config.rpc);
@@ -207,22 +227,25 @@ async function getCurrentGasPrice(network) {
   }
 }
 
-async function calculateGasCost(network, ethPriceUSD = 3200) {
+async function calculateGasCost(network) {
   const gasPrice = await getCurrentGasPrice(network);
   const gasLimit = GAS_ESTIMATES[network].swapGasLimit * GAS_ESTIMATES[network].swapsPerArbitrage;
+  const nativeTokenPrice = NETWORKS[network].nativeTokenPrice;
+  const nativeToken = NETWORKS[network].nativeToken;
   
-  const gasCostETH = (gasLimit * gasPrice) / 1e9;
-  const gasCostUSD = gasCostETH * ethPriceUSD;
+  const gasCostNative = (gasLimit * gasPrice) / 1e9;
+  const gasCostUSD = gasCostNative * nativeTokenPrice;
   
   return {
     gasPrice: gasPrice,
     gasLimit: gasLimit,
-    gasCostETH: gasCostETH,
-    gasCostUSD: gasCostUSD
+    gasCostNative: gasCostNative,
+    gasCostUSD: gasCostUSD,
+    nativeToken: nativeToken
   };
 }
 
-// server.js - Part 2 of 2 (FINAL VERSION)
+// server.js - Part 2 of 2 (UPDATED VERSION)
 // Continue from Part 1 - Add this after calculateGasCost function
 
 async function checkPoolLiquidity(network, tokenIn, tokenOut, fee) {
@@ -322,8 +345,9 @@ async function calculateArbitrage(network, path, amount, minLiquidityCheck = tru
               gasDetails: gasCost ? {
                 gasPrice: gasCost.gasPrice.toFixed(2),
                 gasLimit: gasCost.gasLimit,
-                gasCostETH: gasCost.gasCostETH.toFixed(6),
-                gasCostUSD: gasCost.gasCostUSD.toFixed(2)
+                gasCostNative: gasCost.gasCostNative.toFixed(6),
+                gasCostUSD: gasCost.gasCostUSD.toFixed(2),
+                nativeToken: gasCost.nativeToken
               } : null,
               fees: [fee1, fee2, fee3],
               feesPercent: [(fee1/10000), (fee2/10000), (fee3/10000)],
@@ -347,12 +371,15 @@ async function calculateArbitrage(network, path, amount, minLiquidityCheck = tru
   return bestResult;
 }
 
-// FIXED: Randomized path generation to avoid scanning same tokens
-function generatePaths(network) {
+// Generate ALL triangular paths (one-time generation)
+function generateAllPaths(network) {
+  if (pathTracking[network].allPaths.length > 0) {
+    return pathTracking[network].allPaths;
+  }
+  
   const tokens = Object.keys(NETWORKS[network].tokens);
   const allPaths = [];
   
-  // Generate ALL possible triangular paths
   for (let i = 0; i < tokens.length; i++) {
     for (let j = 0; j < tokens.length; j++) {
       if (i === j) continue;
@@ -363,14 +390,50 @@ function generatePaths(network) {
     }
   }
   
-  // Shuffle array to randomize path selection
+  // Shuffle for randomization
   for (let i = allPaths.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [allPaths[i], allPaths[j]] = [allPaths[j], allPaths[i]];
   }
   
-  console.log(`Generated ${allPaths.length} triangular paths for ${network} (randomized)`);
+  pathTracking[network].allPaths = allPaths;
+  console.log(`Generated ${allPaths.length} total triangular paths for ${network}`);
+  
   return allPaths;
+}
+
+// Get next batch of 50 unscanned paths
+function getNextBatch(network, batchSize = 50) {
+  const tracking = pathTracking[network];
+  const allPaths = tracking.allPaths;
+  const batch = [];
+  
+  // If we've scanned all paths, reset
+  if (tracking.totalScanned >= allPaths.length) {
+    console.log(`\n🔄 All ${allPaths.length} paths scanned! Resetting and starting over...\n`);
+    tracking.scannedPaths.clear();
+    tracking.currentBatchIndex = 0;
+    tracking.totalScanned = 0;
+  }
+  
+  // Get next unscanned paths
+  let index = tracking.currentBatchIndex;
+  while (batch.length < batchSize && index < allPaths.length) {
+    const path = allPaths[index];
+    const pathKey = path.join('-');
+    
+    if (!tracking.scannedPaths.has(pathKey)) {
+      batch.push(path);
+      tracking.scannedPaths.add(pathKey);
+    }
+    
+    index++;
+  }
+  
+  tracking.currentBatchIndex = index;
+  tracking.totalScanned += batch.length;
+  
+  return batch;
 }
 
 // API Endpoints
@@ -382,6 +445,16 @@ app.get('/health', (req, res) => {
     tokenCounts: {
       arbitrum: Object.keys(NETWORKS.arbitrum.tokens).length,
       polygon: Object.keys(NETWORKS.polygon.tokens).length
+    },
+    pathTracking: {
+      arbitrum: {
+        totalPaths: pathTracking.arbitrum.allPaths.length,
+        scannedPaths: pathTracking.arbitrum.totalScanned
+      },
+      polygon: {
+        totalPaths: pathTracking.polygon.allPaths.length,
+        scannedPaths: pathTracking.polygon.totalScanned
+      }
     }
   });
 });
@@ -400,24 +473,20 @@ app.get('/tokens/:network', (req, res) => {
 });
 
 app.post('/scan', async (req, res) => {
-  const { network, amount, minProfit, maxPaths, checkLiquidity = true } = req.body;
+  const { network, amount, minProfit, checkLiquidity = true } = req.body;
   
   if (!NETWORKS[network]) {
     return res.status(400).json({ error: 'Invalid network' });
   }
   
   try {
-    const allPaths = generatePaths(network);
-    const opportunities = [];
-    const limit = Math.min(maxPaths || 50, allPaths.length);
+    // Generate all paths once
+    const allPaths = generateAllPaths(network);
     
-    // Select diverse paths spread across the array
-    const selectedPaths = [];
-    const step = Math.floor(allPaths.length / limit);
-    for (let i = 0; i < limit; i++) {
-      const index = (i * step + Math.floor(Math.random() * step)) % allPaths.length;
-      selectedPaths.push(allPaths[index]);
-    }
+    // Get next batch of 50 unscanned paths
+    const batch = getNextBatch(network, 50);
+    
+    const opportunities = [];
     
     console.log(`\n${'='.repeat(70)}`);
     console.log(`🚀 STARTING ARBITRAGE SCAN`);
@@ -426,33 +495,23 @@ app.post('/scan', async (req, res) => {
     console.log(`Input Amount: $${amount}`);
     console.log(`Min Profit: ${minProfit}%`);
     console.log(`Liquidity Check: ${checkLiquidity ? 'Enabled ✓' : 'Disabled ✗'}`);
-    console.log(`Paths to Scan: ${limit} of ${allPaths.length} total (randomized)`);
+    console.log(`Paths to Scan: ${batch.length}`);
+    console.log(`Progress: Scanned ${pathTracking[network].totalScanned} / ${allPaths.length} total paths so far`);
     console.log(`${'='.repeat(70)}\n`);
     
     console.log('⛽ Fetching current gas prices...');
     const gasCost = await calculateGasCost(network);
     console.log(`   Gas Price: ${gasCost.gasPrice.toFixed(2)} GWEI`);
     console.log(`   Gas Limit: ${gasCost.gasLimit.toLocaleString()} units`);
-    console.log(`   Gas Cost: $${gasCost.gasCostUSD.toFixed(2)} (${gasCost.gasCostETH.toFixed(6)} ETH)`);
+    console.log(`   Gas Cost: $${gasCost.gasCostUSD.toFixed(2)} (${gasCost.gasCostNative.toFixed(6)} ${gasCost.nativeToken})`);
     console.log(`${'='.repeat(70)}\n`);
     
-    let scannedCount = 0;
-    const scannedPaths = new Set();
-    
-    for (let i = 0; i < selectedPaths.length; i++) {
-      const path = selectedPaths[i];
-      const pathKey = path.join('-');
+    for (let i = 0; i < batch.length; i++) {
+      const path = batch[i];
       
-      if (scannedPaths.has(pathKey)) {
-        console.log(`   ⏩ Skipping duplicate: ${path.join(' → ')}`);
-        continue;
-      }
-      
-      scannedPaths.add(pathKey);
-      console.log(`\n[${i + 1}/${limit}]`);
+      console.log(`\n[${i + 1}/${batch.length}]`);
       
       const result = await calculateArbitrage(network, path, amount, checkLiquidity, gasCost);
-      scannedCount++;
       
       if (result && result.netProfitPercent >= minProfit) {
         opportunities.push(result);
@@ -460,15 +519,16 @@ app.post('/scan', async (req, res) => {
         console.log(`   ${'─'.repeat(66)}`);
         console.log(`   Path: ${result.path}`);
         console.log(`   Gross Profit: $${result.profit.toFixed(2)} (+${result.profitPercent.toFixed(3)}%)`);
-        console.log(`   Gas Cost: -$${result.gasCost.toFixed(2)}`);
+        console.log(`   Gas Cost: -$${result.gasCost.toFixed(2)} (${result.gasDetails.gasCostNative} ${result.gasDetails.nativeToken})`);
         console.log(`   Net Profit: $${result.netProfit.toFixed(2)} (+${result.netProfitPercent.toFixed(3)}%)`);
         console.log(`   Pool Fees: ${result.feesPercent.map(f => f.toFixed(2) + '%').join(' → ')}`);
         console.log(`   ${'─'.repeat(66)}\n`);
       }
       
-      if ((scannedCount) % 10 === 0) {
+      if ((i + 1) % 10 === 0) {
         console.log(`\n${'─'.repeat(70)}`);
-        console.log(`📊 Progress Update: ${scannedCount}/${limit} paths scanned`);
+        console.log(`📊 Progress Update: ${i + 1}/${batch.length} paths in this batch`);
+        console.log(`📊 Overall Progress: ${pathTracking[network].totalScanned} / ${allPaths.length} total paths`);
         console.log(`💰 Profitable Found: ${opportunities.length}`);
         if (opportunities.length > 0) {
           console.log(`🏆 Best Net Profit: +${Math.max(...opportunities.map(o => o.netProfitPercent)).toFixed(3)}%`);
@@ -482,7 +542,8 @@ app.post('/scan', async (req, res) => {
     console.log(`\n${'='.repeat(70)}`);
     console.log(`✨ SCAN COMPLETE`);
     console.log(`${'='.repeat(70)}`);
-    console.log(`Total Paths Scanned: ${scannedCount}`);
+    console.log(`Paths Scanned in This Batch: ${batch.length}`);
+    console.log(`Total Paths Scanned So Far: ${pathTracking[network].totalScanned} / ${allPaths.length}`);
     console.log(`Profitable Opportunities: ${opportunities.length}`);
     if (opportunities.length > 0) {
       console.log(`Best Gross Profit: +${opportunities[0].profitPercent.toFixed(3)}%`);
@@ -491,34 +552,38 @@ app.post('/scan', async (req, res) => {
       opportunities.slice(0, 5).forEach((opp, idx) => {
         console.log(`  ${idx + 1}. ${opp.path}`);
         console.log(`     Gross: $${opp.profit.toFixed(2)} (+${opp.profitPercent.toFixed(3)}%)`);
-        console.log(`     Gas: -$${opp.gasCost.toFixed(2)}`);
+        console.log(`     Gas: -$${opp.gasCost.toFixed(2)} (${opp.gasDetails.gasCostNative} ${opp.gasDetails.nativeToken})`);
         console.log(`     Net: $${opp.netProfit.toFixed(2)} (+${opp.netProfitPercent.toFixed(3)}%)`);
       });
     } else {
-      console.log(`No profitable opportunities found with current parameters.`);
-      console.log(`\n💡 Suggestions:`);
-      console.log(`   • Lower min profit to 0.1% or 0.2%`);
-      console.log(`   • Increase input amount to $5000 or $10000`);
-      console.log(`   • Try scanning more paths (increase maxPaths to 100+)`);
-      console.log(`   • Disable liquidity check temporarily`);
+      console.log(`No profitable opportunities found in this batch.`);
     }
+    
+    // Show if all paths have been scanned
+    if (pathTracking[network].totalScanned >= allPaths.length) {
+      console.log(`\n🎉 ALL PATHS SCANNED! Next scan will start from the beginning.`);
+    }
+    
     console.log(`${'='.repeat(70)}\n`);
     
     res.json({
       success: true,
       network: NETWORKS[network].name,
-      scanned: scannedCount,
+      scanned: batch.length,
       opportunities: opportunities.slice(0, 20),
       gasCost: {
         gasPrice: gasCost.gasPrice.toFixed(2),
         gasCostUSD: gasCost.gasCostUSD.toFixed(2),
-        gasCostETH: gasCost.gasCostETH.toFixed(6)
+        gasCostNative: gasCost.gasCostNative.toFixed(6),
+        nativeToken: gasCost.nativeToken
       },
       stats: {
         total: opportunities.length,
         bestProfit: opportunities[0]?.profitPercent || 0,
         bestNetProfit: opportunities[0]?.netProfitPercent || 0,
-        totalPaths: allPaths.length
+        totalPaths: allPaths.length,
+        scannedSoFar: pathTracking[network].totalScanned,
+        percentComplete: ((pathTracking[network].totalScanned / allPaths.length) * 100).toFixed(2)
       }
     });
     
@@ -541,6 +606,26 @@ app.post('/check-liquidity', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.post('/reset-tracking', (req, res) => {
+  const { network } = req.body;
+  
+  if (!NETWORKS[network]) {
+    return res.status(400).json({ error: 'Invalid network' });
+  }
+  
+  pathTracking[network].scannedPaths.clear();
+  pathTracking[network].currentBatchIndex = 0;
+  pathTracking[network].totalScanned = 0;
+  
+  console.log(`🔄 Reset path tracking for ${network}`);
+  
+  res.json({
+    success: true,
+    message: `Path tracking reset for ${network}`,
+    totalPaths: pathTracking[network].allPaths.length
+  });
 });
 
 // WebSocket for real-time updates
@@ -570,34 +655,48 @@ io.on('connection', (socket) => {
       if (scanState.stop) return;
       
       try {
-        const paths = generatePaths(network);
+        const allPaths = generateAllPaths(network);
         const gasCost = await calculateGasCost(network);
-        const batchSize = 10;
         
-        for (let i = 0; i < paths.length && !scanState.stop; i += batchSize) {
-          const batch = paths.slice(i, i + batchSize);
+        // Get next batch
+        const batch = getNextBatch(network, 50);
+        
+        if (batch.length === 0) {
+          socket.emit('scanComplete', { 
+            message: 'All paths scanned. Restarting...',
+            totalScanned: pathTracking[network].totalScanned,
+            totalPaths: allPaths.length
+          });
+          setTimeout(runScan, 2000);
+          return;
+        }
+        
+        for (let i = 0; i < batch.length && !scanState.stop; i++) {
+          const path = batch[i];
+          const result = await calculateArbitrage(network, path, amount, checkLiquidity, gasCost);
           
-          const results = await Promise.all(
-            batch.map(path => calculateArbitrage(network, path, amount, checkLiquidity, gasCost))
-          );
-          
-          for (const result of results) {
-            if (result && result.netProfitPercent >= minProfit) {
-              socket.emit('opportunity', result);
-            }
+          if (result && result.netProfitPercent >= minProfit) {
+            socket.emit('opportunity', result);
           }
           
           socket.emit('progress', {
-            scanned: Math.min(i + batchSize, paths.length),
-            total: paths.length
+            scanned: i + 1,
+            batchTotal: batch.length,
+            totalScanned: pathTracking[network].totalScanned,
+            totalPaths: allPaths.length,
+            percentComplete: ((pathTracking[network].totalScanned / allPaths.length) * 100).toFixed(2)
           });
           
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        socket.emit('scanComplete', { message: 'Scan cycle complete' });
+        socket.emit('batchComplete', {
+          message: 'Batch complete',
+          totalScanned: pathTracking[network].totalScanned,
+          totalPaths: allPaths.length
+        });
         
-        setTimeout(runScan, 5000);
+        setTimeout(runScan, 1000);
         
       } catch (error) {
         socket.emit('error', { message: error.message });
@@ -631,29 +730,30 @@ server.listen(PORT, () => {
 ╔════════════════════════════════════════════════════════════════╗
 ║                                                                ║
 ║   🚀 Uniswap V3 Triangular Arbitrage Scanner                  ║
-║   💎 With Gas Calculation & Diverse Path Selection            ║
+║   💎 Progressive Path Scanning with Gas Calculation           ║
 ║                                                                ║
 ║   Running on port ${PORT}                                        ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
 
 📊 Networks Available:
-   • Arbitrum (${Object.keys(NETWORKS.arbitrum.tokens).length} tokens)
-   • Polygon (${Object.keys(NETWORKS.polygon.tokens).length} tokens)
+   • Arbitrum (${Object.keys(NETWORKS.arbitrum.tokens).length} tokens) - Gas: ${NETWORKS.arbitrum.nativeToken}
+   • Polygon (${Object.keys(NETWORKS.polygon.tokens).length} tokens) - Gas: ${NETWORKS.polygon.nativeToken}
 
 💰 Fee Tiers: ${POOL_FEES.map(f => (f/10000) + '%').join(', ')}
 
 📡 API Endpoints:
    GET  /health              - Server health check
    GET  /tokens/:network     - Get token list
-   POST /scan                - Scan for arbitrage
+   POST /scan                - Scan next batch of 50 paths
    POST /check-liquidity     - Check pool liquidity
+   POST /reset-tracking      - Reset path tracking
 
 🔌 WebSocket: ws://localhost:${PORT}
 
 🌐 Frontend: http://localhost:${PORT}
 
-✅ Ready to scan for arbitrage opportunities!
-✨ Now with randomized diverse path selection!
+✅ Ready to scan! Each scan processes 50 new paths.
+✨ Tracks progress and resets after all paths scanned!
   `);
 });
