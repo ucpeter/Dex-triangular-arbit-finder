@@ -468,11 +468,23 @@ const pathTracking = {
   }
 };
 
-// Get next batch of paths
 function getNextBatch(network, baseToken, batchSize = 50) {
-  const tracking = pathTracking[network];
+  // Create a unique key for this network + baseToken combination
+  const trackingKey = `${network}:${baseToken}`;
   
-  // Generate paths if not already generated for this base token
+  // Initialize tracking for this specific baseToken if it doesn't exist
+  if (!pathTracking[trackingKey]) {
+    pathTracking[trackingKey] = {
+      allPaths: [],
+      scannedPaths: new Set(),
+      currentBatchIndex: 0,
+      totalScanned: 0
+    };
+  }
+  
+  const tracking = pathTracking[trackingKey];
+  
+  // Generate paths if needed (or if baseToken changed)
   if (tracking.allPaths.length === 0) {
     tracking.allPaths = generateOptimizedPaths(network, baseToken, 500);
     console.log(`Generated ${tracking.allPaths.length} paths for ${baseToken} on ${network}`);
@@ -483,7 +495,7 @@ function getNextBatch(network, baseToken, batchSize = 50) {
     tracking.scannedPaths.clear();
     tracking.currentBatchIndex = 0;
     tracking.totalScanned = 0;
-    console.log(`Reset tracking for ${network} - all paths scanned`);
+    console.log(`Reset tracking for ${baseToken} on ${network} - all paths scanned`);
   }
   
   // Get next batch
@@ -658,6 +670,7 @@ app.post('/scan', async (req, res) => {
     // Step 3: Get next batch of paths
     console.log('\n🔄 Getting next batch of paths...');
     const batch = getNextBatch(network, baseToken, 50);
+    const trackingKey = `${network}:${baseToken}`;
     console.log(`   Batch Size: ${batch.length} paths`);
     console.log(`   Total Scanned So Far: ${pathTracking[network].totalScanned}`);
     console.log(`   Total Paths Available: ${pathTracking[network].allPaths.length}`);
