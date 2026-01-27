@@ -508,84 +508,61 @@ function getNextBatch(network, baseToken, batchSize = 50) {
   return batch;
 }
 
-// Main arbitrage calculation
 async function calculateArbitrage(network, path, amountTokens, gasCost, minProfitPercent = 0.1) {
   const [tokenA, tokenB, tokenC] = path;
   
-  // Validate all tokens exist
-  for (const token of path) {
-    if (!NETWORKS[network].tokens[token]) {
-      console.log(`Token ${token} not found, skipping path`);
-      return null;
-    }
+  // OPTIMIZATION: Only check common fee tiers
+  const FEES_TO_CHECK = [500, 3000]; // 0.05% and 0.3% only
+  let bestResult = null;
+  let bestProfit = -Infinity;
+  
+  // Quick check: Skip if tokens don't exist
+  if (!NETWORKS[network].tokens[tokenA] || 
+      !NETWORKS[network].tokens[tokenB] || 
+      !NETWORKS[network].tokens[tokenC]) {
+    return null;
   }
   
-  let bestProfit = -Infinity;
-  let bestResult = null;
-  
-  // Try all fee combinations
-  for (const fee1 of POOL_FEES) {
-    for (const fee2 of POOL_FEES) {
-      for (const fee3 of POOL_FEES) {
-        try {
-          // First swap: A -> B
-          const amountB = await getQuote(network, tokenA, tokenB, amountTokens, fee1, true);
-          if (!amountB || amountB <= 0) continue;
+  // Try each fee combination (now only 8 instead of 64)
+  for (const fee1 of FEES_TO_CHECK) {
+    const amountB = await getQuote(network, tokenA, tokenB, amountTokens, fee1, true);
+    if (!amountB) continue;
+    
+    for (const fee2 of FEES_TO_CHECK) {
+      const amountC = await getQuote(network, tokenB, tokenC, amountB, fee2, true);
+      if (!amountC) continue;
+      
+      for (const fee3 of FEES_TO_CHECK) {
+        const amountFinal = await getQuote(network, tokenC, tokenA, amountC, fee3, true);
+        if (!amountFinal) continue;
+        
+        const profitPercent = ((amountFinal - amountTokens) / amountTokens) * 100;
+        
+        if (profitPercent > bestProfit && profitPercent >= minProfitPercent) {
+          bestProfit = profitPercent;
           
-          // Second swap: B -> C
-          const amountC = await getQuote(network, tokenB, tokenC, amountB, fee2, true);
-          if (!amountC || amountC <= 0) continue;
+          // Calculate USD values (ONCE at the end, not during loop)
+          const tokenPrice = await getTokenPriceUSD(network, tokenA);
+          const profitUSD = (amountFinal - amountTokens) * tokenPrice;
+          const netProfitUSD = profitUSD - (gasCost?.gasCostUSD || 0);
           
-          // Third swap: C -> A
-          const amountFinal = await getQuote(network, tokenC, tokenA, amountC, fee3, true);
-          if (!amountFinal || amountFinal <= 0) continue;
-          
-          const profit = amountFinal - amountTokens;
-          const profitPercent = (profit / amountTokens) * 100;
-          
-          // Skip if below minimum profit
-          if (profitPercent < minProfitPercent) continue;
-          
-          // Calculate net profit after gas
-          const netProfit = gasCost ? profit - gasCost.gasCostUSD : profit;
-          const netProfitPercent = gasCost ? (netProfit / amountTokens) * 100 : profitPercent;
-          
-          // Only consider positive net profit after gas
-          if (netProfit <= 0) continue;
-          
-          if (profitPercent > bestProfit) {
-            bestProfit = profitPercent;
+          if (netProfitUSD > 0) { // Only keep if actually profitable after gas
             bestResult = {
               path: `${tokenA} → ${tokenB} → ${tokenC} → ${tokenA}`,
               inputAmount: amountTokens,
               outputAmount: amountFinal,
-              profit: profit,
+              profit: profitUSD,
               profitPercent: profitPercent,
-              gasCost: gasCost ? gasCost.gasCostUSD : 0,
-              netProfit: netProfit,
-              netProfitPercent: netProfitPercent,
-              gasDetails: gasCost ? {
-                gasPrice: gasCost.gasPriceGwei.toFixed(2),
-                gasLimit: gasCost.gasLimit,
-                gasCostNative: gasCost.gasCostNative.toFixed(6),
-                gasCostUSD: gasCost.gasCostUSD.toFixed(2),
-                nativeToken: gasCost.nativeToken
-              } : null,
+              gasCost: gasCost?.gasCostUSD || 0,
+              netProfit: netProfitUSD,
+              netProfitPercent: (netProfitUSD / (amountTokens * tokenPrice)) * 100,
               fees: [fee1, fee2, fee3],
               feesPercent: [(fee1/10000), (fee2/10000), (fee3/10000)],
               network: network,
               pathArray: [tokenA, tokenB, tokenC],
-              tokenPrices: {
-                [tokenA]: await getTokenPriceUSD(network, tokenA),
-                [tokenB]: await getTokenPriceUSD(network, tokenB),
-                [tokenC]: await getTokenPriceUSD(network, tokenC)
-              },
               timestamp: new Date().toISOString()
             };
           }
-        } catch (error) {
-          // Silently continue to next fee combination
-          continue;
         }
       }
     }
