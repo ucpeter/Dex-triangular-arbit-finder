@@ -346,6 +346,51 @@
             font-weight: 600;
         }
 
+        /* Gas Cost Card */
+        .gas-cost-card {
+            background: rgba(251, 191, 36, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            margin-bottom: 24px;
+        }
+
+        .gas-cost-card h3 {
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            color: #fbbf24;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .gas-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .gas-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+        }
+
+        .gas-label {
+            color: #9ca3af;
+            font-size: 0.875rem;
+        }
+
+        .gas-value {
+            color: #fbbf24;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
         /* Info Boxes */
         .info-boxes {
             display: grid;
@@ -375,46 +420,6 @@
             background: rgba(16, 185, 129, 0.2);
             border: 1px solid #10b981;
             color: #6ee7b7;
-        }
-
-        .gas-cost-card {
-            background: rgba(251, 191, 36, 0.1);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid rgba(251, 191, 36, 0.3);
-            margin-bottom: 24px;
-        }
-
-        .gas-cost-card h3 {
-            font-size: 1.1rem;
-            margin-bottom: 16px;
-            color: #fbbf24;
-        }
-
-        .gas-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-        }
-
-        .gas-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 6px;
-        }
-
-        .gas-label {
-            color: #9ca3af;
-            font-size: 0.875rem;
-        }
-
-        .gas-value {
-            color: #fbbf24;
-            font-weight: 600;
         }
 
         /* Responsive */
@@ -540,7 +545,26 @@
             </div>
         </div>
 
-        <!-- Opportunities Table -->
+        <!-- Gas Cost Display -->
+        <div class="gas-cost-card" id="gasCostCard" style="display: none;">
+            <h3>⛽ Current Gas Costs</h3>
+            <div class="gas-details">
+                <div class="gas-item">
+                    <span class="gas-label">Gas Price:</span>
+                    <span class="gas-value" id="gasPrice">-</span>
+                </div>
+                <div class="gas-item">
+                    <span class="gas-label">Cost per Trade:</span>
+                    <span class="gas-value" id="gasCostUSD">-</span>
+                </div>
+                <div class="gas-item">
+                    <span class="gas-label" id="nativeTokenLabel">ETH Cost:</span>
+                    <span class="gas-value" id="gasCostNative">-</span>
+                </div>
+            </div>
+    </div>
+
+    <!-- Opportunities Table -->
         <div class="opportunities-section">
             <h2>🎯 Live Opportunities</h2>
             <div id="opportunitiesContainer">
@@ -562,25 +586,6 @@
                     </thead>
                     <tbody id="opportunitiesBody"></tbody>
                 </table>
-            </div>
-        </div>
-
-        <!-- Gas Cost Display -->
-        <div class="gas-cost-card" id="gasCostCard" style="display: none;">
-            <h3>⛽ Current Gas Costs</h3>
-            <div class="gas-details">
-                <div class="gas-item">
-                    <span class="gas-label">Gas Price:</span>
-                    <span class="gas-value" id="gasPrice">-</span>
-                </div>
-                <div class="gas-item">
-                    <span class="gas-label">Cost per Trade:</span>
-                    <span class="gas-value" id="gasCostUSD">-</span>
-                </div>
-                <div class="gas-item">
-                    <span class="gas-label">ETH Cost:</span>
-                    <span class="gas-value" id="gasCostETH">-</span>
-                </div>
             </div>
         </div>
 
@@ -627,7 +632,8 @@
             gasCostCard: document.getElementById('gasCostCard'),
             gasPrice: document.getElementById('gasPrice'),
             gasCostUSD: document.getElementById('gasCostUSD'),
-            gasCostETH: document.getElementById('gasCostETH')
+            gasCostNative: document.getElementById('gasCostNative'),
+            nativeTokenLabel: document.getElementById('nativeTokenLabel')
         };
 
         // Initialize
@@ -658,7 +664,12 @@
                 if (res.data.status === 'ok') {
                     el.statusDot.className = 'status-dot connected';
                     el.statusText.textContent = 'Connected';
-                    el.totalPaths.textContent = res.data.tokenCounts?.[el.networkSelect.value]?.toLocaleString() || '0';
+                    
+                    // Update total paths display
+                    const pathTracking = res.data.pathTracking?.[el.networkSelect.value];
+                    if (pathTracking) {
+                        el.totalPaths.textContent = pathTracking.totalPaths?.toLocaleString() || '0';
+                    }
                 }
             } catch (error) {
                 el.statusDot.className = 'status-dot error';
@@ -718,30 +729,44 @@
                     network: el.networkSelect.value,
                     amount: parseFloat(el.inputAmount.value),
                     minProfit: parseFloat(el.minProfit.value),
-                    maxPaths: 50,
                     checkLiquidity: checkLiquidity
                 });
                 
                 if (res.data.success) {
-                    el.scannedCount.textContent = res.data.scanned;
+                    // Update scan statistics
+                    el.scannedCount.textContent = res.data.stats?.scannedSoFar?.toLocaleString() || res.data.scanned;
                     el.profitableCount.textContent = res.data.stats.total;
                     el.bestProfit.textContent = res.data.stats.bestNetProfit > 0 
                         ? `+${res.data.stats.bestNetProfit.toFixed(3)}%` 
                         : '0%';
                     
-                    // Update gas cost display
+                    // Update total paths
+                    if (res.data.stats.totalPaths) {
+                        el.totalPaths.textContent = res.data.stats.totalPaths.toLocaleString();
+                    }
+                    
+                    // Update gas cost display with correct native token
                     if (res.data.gasCost) {
                         el.gasCostCard.style.display = 'block';
+                        
+                        const nativeToken = res.data.gasCost.nativeToken || 'ETH';
+                        
                         el.gasPrice.textContent = `${res.data.gasCost.gasPrice} GWEI`;
                         el.gasCostUSD.textContent = `$${res.data.gasCost.gasCostUSD}`;
-                        el.gasCostETH.textContent = `${res.data.gasCost.gasCostETH} ETH`;
+                        el.gasCostNative.textContent = `${res.data.gasCost.gasCostNative} ${nativeToken}`;
+                        el.nativeTokenLabel.textContent = `${nativeToken} Cost:`;
                     }
                     
                     updateOpportunities(res.data.opportunities);
                     
+                    // Update status message with progress
+                    const progress = res.data.stats.percentComplete 
+                        ? ` (${res.data.stats.percentComplete}% complete)` 
+                        : '';
+                    
                     el.statusMessage.textContent = res.data.stats.total > 0
-                        ? `Found ${res.data.stats.total} profitable opportunities!`
-                        : 'No profitable opportunities found. Continuing scan...';
+                        ? `Found ${res.data.stats.total} profitable opportunities!${progress}`
+                        : `No profitable opportunities found. Continuing scan...${progress}`;
                 }
             } catch (error) {
                 console.error('Scan error:', error);
@@ -751,34 +776,51 @@
         }
 
         function updateOpportunities(newOpps) {
+            // Merge new opportunities with existing ones
             allOpportunities = [...newOpps, ...allOpportunities];
+            
+            // Remove duplicates based on path + timestamp
             const unique = Array.from(
                 new Map(allOpportunities.map(item => [item.path + item.timestamp, item])).values()
             );
-            allOpportunities = unique.sort((a, b) => b.profitPercent - a.profitPercent).slice(0, 20);
+            
+            // Sort by net profit and keep top 20
+            allOpportunities = unique
+                .sort((a, b) => (b.netProfitPercent || b.profitPercent) - (a.netProfitPercent || a.profitPercent))
+                .slice(0, 20);
             
             if (allOpportunities.length > 0) {
                 el.emptyState.classList.add('hidden');
                 el.opportunitiesTable.classList.remove('hidden');
-                el.opportunitiesBody.innerHTML = allOpportunities.map(opp => `
-                    <tr>
-                        <td class="path-cell">${opp.path}</td>
-                        <td>$${opp.inputAmount.toFixed(2)}</td>
-                        <td>$${opp.outputAmount.toFixed(2)}</td>
-                        <td class="success-text">+$${opp.profit.toFixed(2)}</td>
-                        <td>
-                            <span class="profit-badge ${opp.profitPercent > 1 ? 'high' : 'medium'}">
-                                +${opp.profitPercent.toFixed(3)}%
-                            </span>
-                        </td>
-                        <td style="font-size: 0.75rem; color: #9ca3af;">
-                            ${opp.feesPercent?.map(f => f.toFixed(2)).join('% / ') || 'N/A'}%
-                        </td>
-                        <td style="font-size: 0.875rem; color: #9ca3af;">
-                            ${new Date(opp.timestamp).toLocaleTimeString()}
-                        </td>
-                    </tr>
-                `).join('');
+                el.opportunitiesBody.innerHTML = allOpportunities.map(opp => {
+                    const netProfit = opp.netProfit || opp.profit;
+                    const netProfitPercent = opp.netProfitPercent || opp.profitPercent;
+                    const gasCost = opp.gasCost || 0;
+                    const nativeToken = opp.gasDetails?.nativeToken || 'ETH';
+                    
+                    return `
+                        <tr>
+                            <td class="path-cell">${opp.path}</td>
+                            <td>$${opp.inputAmount.toFixed(2)}</td>
+                            <td>$${opp.outputAmount.toFixed(2)}</td>
+                            <td class="success-text">
+                                +$${netProfit.toFixed(2)}
+                                ${gasCost > 0 ? `<br><span style="font-size: 0.75rem; color: #ef4444;">-$${gasCost.toFixed(2)} gas</span>` : ''}
+                            </td>
+                            <td>
+                                <span class="profit-badge ${netProfitPercent > 1 ? 'high' : 'medium'}">
+                                    +${netProfitPercent.toFixed(3)}%
+                                </span>
+                            </td>
+                            <td style="font-size: 0.75rem; color: #9ca3af;">
+                                ${opp.feesPercent?.map(f => f.toFixed(2)).join('% / ') || 'N/A'}%
+                            </td>
+                            <td style="font-size: 0.875rem; color: #9ca3af;">
+                                ${new Date(opp.timestamp).toLocaleTimeString()}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
             }
         }
 
