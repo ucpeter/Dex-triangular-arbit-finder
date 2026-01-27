@@ -692,9 +692,7 @@ app.post('/scan', async (req, res) => {
     for (let i = 0; i < batch.length; i++) {
       const path = batch[i];
       
-      if (i % 10 === 0) {
-        console.log(`   Progress: ${i}/${batch.length} paths`);
-      }
+      console.log(`   Checking: ${path[0]} → ${path[1]} → ${path[2]} → ${path[0]}`);
       
       const result = await calculateArbitrage(network, path, tokenAmount, gasCost, minProfitPercent);
       
