@@ -469,10 +469,10 @@ const pathTracking = {
 };
 
 function getNextBatch(network, baseToken, batchSize = 50) {
-  // Create a unique key for this network + baseToken combination
+  // Create unique tracking key for this network + baseToken
   const trackingKey = `${network}:${baseToken}`;
   
-  // Initialize tracking for this specific baseToken if it doesn't exist
+  // Initialize tracking for this specific baseToken
   if (!pathTracking[trackingKey]) {
     pathTracking[trackingKey] = {
       allPaths: [],
@@ -484,7 +484,7 @@ function getNextBatch(network, baseToken, batchSize = 50) {
   
   const tracking = pathTracking[trackingKey];
   
-  // Generate paths if needed (or if baseToken changed)
+  // Generate paths if needed
   if (tracking.allPaths.length === 0) {
     tracking.allPaths = generateOptimizedPaths(network, baseToken, 500);
     console.log(`Generated ${tracking.allPaths.length} paths for ${baseToken} on ${network}`);
@@ -671,6 +671,7 @@ app.post('/scan', async (req, res) => {
     console.log('\n🔄 Getting next batch of paths...');
     const batch = getNextBatch(network, baseToken, 50);
     const trackingKey = `${network}:${baseToken}`;
+    
     console.log(`   Batch Size: ${batch.length} paths`);
     console.log(`   Total Scanned So Far: ${pathTracking[network].totalScanned}`);
     console.log(`   Total Paths Available: ${pathTracking[network].allPaths.length}`);
@@ -781,11 +782,34 @@ app.post('/reset-tracking', (req, res) => {
   
   console.log(`🔄 Reset path tracking for ${network}${baseToken ? ` (${baseToken})` : ''}`);
   
-  res.json({
-    success: true,
-    message: `Path tracking reset for ${network}`,
-    baseToken: baseToken || 'any'
-  });
+  // Replace the ENTIRE res.json() call with this:
+res.json({
+  success: true,
+  network: NETWORKS[network].name,
+  baseToken: baseToken,
+  conversion: {
+    usdAmount: amountUSD,
+    tokenAmount: tokenAmount,
+    tokenPrice: tokenPrice,
+    tokenValueUSD: tokenAmount * tokenPrice
+  },
+  gasCost: {
+    gasPriceGwei: gasCost.gasPriceGwei.toFixed(2),
+    gasCostUSD: gasCost.gasCostUSD.toFixed(2),
+    gasCostNative: gasCost.gasCostNative.toFixed(6),
+    nativeToken: gasCost.nativeToken
+  },
+  scanStats: {
+    pathsScanned: batch.length,
+    opportunitiesFound: opportunities.length,
+    // ✅ CRITICAL FIX: Use the correct tracking key
+    totalScannedSoFar: pathTracking[`${network}:${baseToken}`]?.totalScanned || 0,
+    totalPaths: pathTracking[`${network}:${baseToken}`]?.allPaths?.length || 0,
+    percentComplete: pathTracking[`${network}:${baseToken}`]?.allPaths?.length > 0 
+      ? ((pathTracking[`${network}:${baseToken}`].totalScanned / pathTracking[`${network}:${baseToken}`].allPaths.length) * 100).toFixed(2)
+      : "0.00"
+  },
+  opportunities: opportunities.slice(0, 20)
 });
 
 // WebSocket for real-time updates
