@@ -7,454 +7,61 @@
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #581c87 50%, #0f172a 100%);
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        /* Header */
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            position: relative;
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            background: linear-gradient(to right, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #9ca3af;
-        }
-
-        .connection-status {
-            position: absolute;
-            top: 0;
-            right: 0;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(30, 41, 59, 0.5);
-            padding: 8px 16px;
-            border-radius: 8px;
-            border: 1px solid rgba(71, 85, 105, 0.5);
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #6b7280;
-        }
-
-        .status-dot.connected {
-            background: #10b981;
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.error {
-            background: #ef4444;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Status Bar */
-        .status-bar {
-            background: rgba(30, 41, 59, 0.5);
-            backdrop-filter: blur(10px);
-            padding: 16px;
-            border-radius: 12px;
-            border: 1px solid rgba(71, 85, 105, 0.5);
-            margin-bottom: 24px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .status-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .status-indicator {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #6b7280;
-        }
-
-        .status-indicator.scanning {
-            background: #10b981;
-            animation: pulse 1s infinite;
-        }
-
-        .network-info {
-            color: #9ca3af;
-            font-size: 0.9rem;
-        }
-
-        /* Error Message */
-        .error-message {
-            background: rgba(220, 38, 38, 0.2);
-            border: 1px solid #ef4444;
-            color: #fca5a5;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .error-message::before {
-            content: "⚠️ ";
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        /* Controls */
-        .controls {
-            background: rgba(30, 41, 59, 0.5);
-            backdrop-filter: blur(10px);
-            padding: 24px;
-            border-radius: 12px;
-            border: 1px solid rgba(71, 85, 105, 0.5);
-            margin-bottom: 24px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-        }
-
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .control-group label {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #d1d5db;
-        }
-
-        .control-group input,
-        .control-group select {
-            background: #334155;
-            border: 1px solid #475569;
-            color: #fff;
-            padding: 10px;
-            border-radius: 8px;
-            font-size: 1rem;
-        }
-
-        .control-group input:focus,
-        .control-group select:focus {
-            outline: none;
-            border-color: #60a5fa;
-        }
-
-        .toggle-btn {
-            padding: 10px;
-            border-radius: 8px;
-            border: none;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            background: #6b7280;
-            color: #fff;
-        }
-
-        .toggle-btn.active {
-            background: #10b981;
-        }
-
-        .scan-btn {
-            padding: 10px 24px;
-            border-radius: 8px;
-            border: none;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            background: linear-gradient(to right, #2563eb, #7c3aed);
-            color: #fff;
-            transition: all 0.3s;
-        }
-
-        .scan-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
-        }
-
-        .scan-btn.scanning {
-            background: #dc2626;
-        }
-
-        .scan-btn:disabled {
-            background: #6b7280;
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-
-        .stat-card {
-            background: rgba(30, 41, 59, 0.5);
-            backdrop-filter: blur(10px);
-            padding: 24px;
-            border-radius: 12px;
-            border: 1px solid rgba(71, 85, 105, 0.5);
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .stat-icon {
-            font-size: 2rem;
-        }
-
-        .stat-label {
-            font-size: 0.875rem;
-            color: #9ca3af;
-            margin-bottom: 4px;
-        }
-
-        .stat-value {
-            font-size: 1.75rem;
-            font-weight: 700;
-        }
-
-        .stat-value.success {
-            color: #10b981;
-        }
-
-        .stat-value.warning {
-            color: #fbbf24;
-        }
-
-        /* Opportunities Section */
-        .opportunities-section {
-            background: rgba(30, 41, 59, 0.5);
-            backdrop-filter: blur(10px);
-            border-radius: 12px;
-            border: 1px solid rgba(71, 85, 105, 0.5);
-            overflow: hidden;
-            margin-bottom: 24px;
-        }
-
-        .opportunities-section h2 {
-            padding: 24px;
-            border-bottom: 1px solid rgba(71, 85, 105, 0.5);
-            font-size: 1.25rem;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #9ca3af;
-        }
-
-        .empty-icon {
-            font-size: 3rem;
-            margin-bottom: 16px;
-        }
-
-        /* Table */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        thead {
-            background: rgba(51, 65, 85, 0.5);
-        }
-
-        th {
-            padding: 16px;
-            text-align: left;
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #d1d5db;
-        }
-
-        tbody tr {
-            border-bottom: 1px solid rgba(71, 85, 105, 0.3);
-            transition: background 0.2s;
-        }
-
-        tbody tr:hover {
-            background: rgba(51, 65, 85, 0.3);
-        }
-
-        td {
-            padding: 16px;
-        }
-
-        .path-cell {
-            font-family: 'Courier New', monospace;
-            font-size: 0.875rem;
-        }
-
-        .profit-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 9999px;
-            font-size: 0.875rem;
-            font-weight: 600;
-        }
-
-        .profit-badge.high {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        .profit-badge.medium {
-            background: rgba(251, 191, 36, 0.2);
-            color: #fbbf24;
-            border: 1px solid rgba(251, 191, 36, 0.3);
-        }
-
-        .success-text {
-            color: #10b981;
-            font-weight: 600;
-        }
-
-        /* Gas Cost Card */
-        .gas-cost-card {
-            background: rgba(251, 191, 36, 0.1);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid rgba(251, 191, 36, 0.3);
-            margin-bottom: 24px;
-        }
-
-        .gas-cost-card h3 {
-            font-size: 1.1rem;
-            margin-bottom: 16px;
-            color: #fbbf24;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .gas-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-        }
-
-        .gas-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 6px;
-        }
-
-        .gas-label {
-            color: #9ca3af;
-            font-size: 0.875rem;
-        }
-
-        .gas-value {
-            color: #fbbf24;
-            font-weight: 600;
-            font-size: 1rem;
-        }
-
-        /* Info Boxes */
-        .info-boxes {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 16px;
-        }
-
-        .info-box {
-            padding: 16px;
-            border-radius: 8px;
-            font-size: 0.875rem;
-        }
-
-        .info-box.info {
-            background: rgba(37, 99, 235, 0.2);
-            border: 1px solid #3b82f6;
-            color: #93c5fd;
-        }
-
-        .info-box.warning {
-            background: rgba(245, 158, 11, 0.2);
-            border: 1px solid #f59e0b;
-            color: #fcd34d;
-        }
-
-        .info-box.success {
-            background: rgba(16, 185, 129, 0.2);
-            border: 1px solid #10b981;
-            color: #6ee7b7;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 1.75rem;
-            }
-
-            .connection-status {
-                position: static;
-                margin-top: 16px;
-                justify-content: center;
-            }
-
-            .controls {
-                grid-template-columns: 1fr;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-
-            table {
-                font-size: 0.75rem;
-            }
-
-            th, td {
-                padding: 8px;
-            }
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #581c87 50%, #0f172a 100%); color: #fff; min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { font-size: 2.5rem; background: linear-gradient(to right, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
+        .header p { color: #9ca3af; }
+        .connection-status { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 8px; background: rgba(30, 41, 59, 0.5); padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(71, 85, 105, 0.5); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+        .status-dot.connected { background: #10b981; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .status-bar { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(10px); padding: 16px; border-radius: 12px; border: 1px solid rgba(71, 85, 105, 0.5); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+        .status-info { display: flex; align-items: center; gap: 12px; }
+        .status-indicator { width: 12px; height: 12px; border-radius: 50%; background: #6b7280; }
+        .status-indicator.scanning { background: #10b981; animation: pulse 1s infinite; }
+        .error-message { background: rgba(220, 38, 38, 0.2); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 8px; margin-bottom: 20px; }
+        .hidden { display: none !important; }
+        .controls { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(10px); padding: 24px; border-radius: 12px; border: 1px solid rgba(71, 85, 105, 0.5); margin-bottom: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+        .control-group { display: flex; flex-direction: column; gap: 8px; }
+        .control-group label { font-size: 0.875rem; font-weight: 500; color: #d1d5db; }
+        .control-group input, .control-group select { background: #334155; border: 1px solid #475569; color: #fff; padding: 10px; border-radius: 8px; font-size: 1rem; }
+        .toggle-btn { padding: 10px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; transition: all 0.3s; background: #6b7280; color: #fff; }
+        .toggle-btn.active { background: #10b981; }
+        .scan-btn { padding: 10px 24px; border-radius: 8px; border: none; font-weight: 600; font-size: 1rem; cursor: pointer; background: linear-gradient(to right, #2563eb, #7c3aed); color: #fff; transition: all 0.3s; }
+        .scan-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); }
+        .scan-btn.scanning { background: #dc2626; }
+        .scan-btn:disabled { background: #6b7280; cursor: not-allowed; opacity: 0.5; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(10px); padding: 24px; border-radius: 12px; border: 1px solid rgba(71, 85, 105, 0.5); display: flex; align-items: center; gap: 16px; }
+        .stat-label { font-size: 0.875rem; color: #9ca3af; margin-bottom: 4px; }
+        .stat-value { font-size: 1.75rem; font-weight: 700; }
+        .stat-value.success { color: #10b981; }
+        .stat-value.warning { color: #fbbf24; }
+        .opportunities-section { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(10px); border-radius: 12px; border: 1px solid rgba(71, 85, 105, 0.5); overflow: hidden; margin-bottom: 24px; }
+        .opportunities-section h2 { padding: 24px; border-bottom: 1px solid rgba(71, 85, 105, 0.5); font-size: 1.25rem; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #9ca3af; }
+        table { width: 100%; border-collapse: collapse; }
+        thead { background: rgba(51, 65, 85, 0.5); }
+        th { padding: 16px; text-align: left; font-size: 0.875rem; font-weight: 600; color: #d1d5db; }
+        tbody tr { border-bottom: 1px solid rgba(71, 85, 105, 0.3); }
+        td { padding: 16px; }
+        .path-cell { font-family: 'Courier New', monospace; font-size: 0.875rem; }
+        .profit-badge { display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; }
+        .profit-badge.high { background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .profit-badge.medium { background: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+        .success-text { color: #10b981; font-weight: 600; }
+        .gas-cost-card { background: rgba(251, 191, 36, 0.1); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; border: 1px solid rgba(251, 191, 36, 0.3); margin-bottom: 24px; }
+        .gas-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+        .gas-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(0, 0, 0, 0.2); border-radius: 6px; }
+        .gas-label { color: #9ca3af; font-size: 0.875rem; }
+        .gas-value { color: #fbbf24; font-weight: 600; font-size: 1rem; }
+        @media (max-width: 768px) { .header h1 { font-size: 1.75rem; } .controls { grid-template-columns: 1fr; } .stats-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <header class="header">
             <h1>⚡ Uniswap V3 Arbitrage Scanner</h1>
             <p>Real-time triangular arbitrage detection</p>
@@ -464,45 +71,40 @@
             </div>
         </header>
 
-        <!-- Status Bar -->
         <div class="status-bar">
             <div class="status-info">
                 <span class="status-indicator" id="scanIndicator"></span>
                 <span id="statusMessage">Ready to scan</span>
             </div>
-            <div class="network-info">
-                <span id="networkDisplay"></span>
-            </div>
+            <div class="network-info" id="networkDisplay"></div>
         </div>
 
-        <!-- Error Message -->
         <div id="errorMessage" class="error-message hidden"></div>
 
-        <!-- Controls -->
         <div class="controls">
             <div class="control-group">
                 <label>Network</label>
                 <select id="networkSelect">
-                    <option value="arbitrum">Arbitrum (62 tokens)</option>
-                    <option value="polygon">Polygon (55 tokens)</option>
+                    <option value="arbitrum">Arbitrum</option>
+                    <option value="polygon">Polygon</option>
                 </select>
             </div>
-
+            <div class="control-group">
+                <label>Base Token</label>
+                <select id="baseTokenSelect"></select>
+            </div>
             <div class="control-group">
                 <label>Input Amount (USD)</label>
                 <input type="number" id="inputAmount" value="1000" min="100">
             </div>
-
             <div class="control-group">
                 <label>Min Profit (%)</label>
-                <input type="number" id="minProfit" value="0.3" step="0.1" min="0.1">
+                <input type="number" id="minProfitPercent" value="0.3" step="0.1" min="0.1">
             </div>
-
             <div class="control-group">
                 <label>Liquidity Check</label>
                 <button id="liquidityToggle" class="toggle-btn active">Enabled</button>
             </div>
-
             <div class="control-group">
                 <button id="scanButton" class="scan-btn">
                     <span id="scanBtnText">▶ Start Scan</span>
@@ -510,109 +112,55 @@
             </div>
         </div>
 
-        <!-- Stats -->
         <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon">📊</div>
-                <div>
-                    <div class="stat-label">Paths Scanned</div>
-                    <div class="stat-value" id="scannedCount">0</div>
-                </div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">📈</div>
-                <div>
-                    <div class="stat-label">Profitable Found</div>
-                    <div class="stat-value success" id="profitableCount">0</div>
-                </div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">💰</div>
-                <div>
-                    <div class="stat-label">Best Profit</div>
-                    <div class="stat-value warning" id="bestProfit">0%</div>
-                </div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-icon">🔄</div>
-                <div>
-                    <div class="stat-label">Total Paths</div>
-                    <div class="stat-value" id="totalPaths">0</div>
-                </div>
-            </div>
+            <div class="stat-card"><div>📊</div><div><div class="stat-label">Paths Scanned</div><div class="stat-value" id="scannedCount">0</div></div></div>
+            <div class="stat-card"><div>📈</div><div><div class="stat-label">Profitable Found</div><div class="stat-value success" id="profitableCount">0</div></div></div>
+            <div class="stat-card"><div>💰</div><div><div class="stat-label">Best Profit</div><div class="stat-value warning" id="bestProfit">0%</div></div></div>
+            <div class="stat-card"><div>🔄</div><div><div class="stat-label">Total Paths</div><div class="stat-value" id="totalPaths">0</div></div></div>
         </div>
 
-        <!-- Gas Cost Display -->
         <div class="gas-cost-card" id="gasCostCard" style="display: none;">
             <h3>⛽ Current Gas Costs</h3>
             <div class="gas-details">
-                <div class="gas-item">
-                    <span class="gas-label">Gas Price:</span>
-                    <span class="gas-value" id="gasPrice">-</span>
-                </div>
-                <div class="gas-item">
-                    <span class="gas-label">Cost per Trade:</span>
-                    <span class="gas-value" id="gasCostUSD">-</span>
-                </div>
-                <div class="gas-item">
-                    <span class="gas-label" id="nativeTokenLabel">ETH Cost:</span>
-                    <span class="gas-value" id="gasCostNative">-</span>
-                </div>
+                <div class="gas-item"><span class="gas-label">Gas Price:</span><span class="gas-value" id="gasPrice">-</span></div>
+                <div class="gas-item"><span class="gas-label">Cost per Trade:</span><span class="gas-value" id="gasCostUSD">-</span></div>
+                <div class="gas-item"><span class="gas-label" id="nativeTokenLabel">ETH Cost:</span><span class="gas-value" id="gasCostNative">-</span></div>
             </div>
-    </div>
+        </div>
 
-    <!-- Opportunities Table -->
         <div class="opportunities-section">
             <h2>🎯 Live Opportunities</h2>
             <div id="opportunitiesContainer">
-                <div class="empty-state" id="emptyState">
-                    <div class="empty-icon">⏳</div>
-                    <p>Click "Start Scan" to begin</p>
-                </div>
+                <div class="empty-state" id="emptyState"><div>⏳</div><p>Click "Start Scan" to begin</p></div>
                 <table id="opportunitiesTable" class="hidden">
                     <thead>
-                        <tr>
-                            <th>Path</th>
-                            <th>Input</th>
-                            <th>Output</th>
-                            <th>Profit</th>
-                            <th>ROI</th>
-                            <th>Fees</th>
-                            <th>Time</th>
-                        </tr>
+                        <tr><th>Path</th><th>Input</th><th>Output</th><th>Profit</th><th>ROI</th><th>Fees</th><th>Time</th></tr>
                     </thead>
                     <tbody id="opportunitiesBody"></tbody>
                 </table>
             </div>
         </div>
-
-        <!-- Info Boxes -->
-        <div class="info-boxes">
-            <div class="info-box info">
-                <strong>ℹ️ All Your Tokens:</strong> Scanner uses all 62 tokens on Arbitrum and 55 tokens on Polygon with real on-chain liquidity checks.
-            </div>
-            <div class="info-box success">
-                <strong>✅ Gas Costs Included:</strong> All profit calculations now include real-time gas costs. Net profit = Gross profit - Gas fees.
-            </div>
-        </div>
     </div>
 
     <script>
-        // Configuration
         const API_URL = window.location.origin;
         let isScanning = false;
-        let scanInterval = null;
+        let socket = null;
         let checkLiquidity = true;
         let allOpportunities = [];
 
-        // DOM Elements
+        // Network-specific token configuration
+        const NETWORK_TOKENS = {
+            arbitrum: ['WETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'ARB', 'LINK', 'GMX'],
+            polygon: ['WMATIC', 'WETH', 'USDC', 'USDT', 'DAI', 'WBTC', 'AAVE', 'LINK']
+        };
+
+        // DOM elements
         const el = {
             networkSelect: document.getElementById('networkSelect'),
+            baseTokenSelect: document.getElementById('baseTokenSelect'),
             inputAmount: document.getElementById('inputAmount'),
-            minProfit: document.getElementById('minProfit'),
+            minProfitPercent: document.getElementById('minProfitPercent'),
             liquidityToggle: document.getElementById('liquidityToggle'),
             scanButton: document.getElementById('scanButton'),
             scanBtnText: document.getElementById('scanBtnText'),
@@ -638,17 +186,33 @@
 
         // Initialize
         function init() {
-            updateNetworkDisplay();
+            setupEventListeners();
+            populateBaseTokens();
             checkHealth();
-            el.networkSelect.addEventListener('change', updateNetworkDisplay);
-            el.liquidityToggle.addEventListener('click', toggleLiquidity);
-            el.scanButton.addEventListener('click', toggleScanning);
+            updateNetworkDisplay();
             setInterval(checkHealth, 30000);
         }
 
+        function setupEventListeners() {
+            el.networkSelect.addEventListener('change', () => {
+                populateBaseTokens();
+                updateNetworkDisplay();
+            });
+            el.liquidityToggle.addEventListener('click', toggleLiquidity);
+            el.scanButton.addEventListener('click', toggleScanning);
+        }
+
+        function populateBaseTokens() {
+            const network = el.networkSelect.value;
+            const tokens = NETWORK_TOKENS[network] || [];
+            el.baseTokenSelect.innerHTML = tokens.map(token => 
+                `<option value="${token}">${token}</option>`
+            ).join('');
+        }
+
         function updateNetworkDisplay() {
-            const names = { arbitrum: 'Arbitrum', polygon: 'Polygon' };
-            el.networkDisplay.textContent = `Network: ${names[el.networkSelect.value]}`;
+            const networkName = el.networkSelect.value === 'arbitrum' ? 'Arbitrum' : 'Polygon';
+            el.networkDisplay.textContent = `Network: ${networkName}`;
         }
 
         function toggleLiquidity() {
@@ -657,54 +221,58 @@
             el.liquidityToggle.textContent = checkLiquidity ? 'Enabled' : 'Disabled';
         }
 
-        // Health Check
+        // Health check
         async function checkHealth() {
             try {
                 const res = await axios.get(`${API_URL}/health`);
                 if (res.data.status === 'ok') {
                     el.statusDot.className = 'status-dot connected';
                     el.statusText.textContent = 'Connected';
-                    
-                    // Update total paths display
-                    const pathTracking = res.data.pathTracking?.[el.networkSelect.value];
-                    if (pathTracking) {
-                        el.totalPaths.textContent = pathTracking.totalPaths?.toLocaleString() || '0';
-                    }
                 }
             } catch (error) {
                 el.statusDot.className = 'status-dot error';
                 el.statusText.textContent = 'Disconnected';
-                showError('Cannot connect to backend. Make sure server is running.');
             }
         }
 
-        function showError(msg) {
-            el.errorMessage.textContent = msg;
-            el.errorMessage.classList.remove('hidden');
-        }
-
-        function hideError() {
-            el.errorMessage.classList.add('hidden');
-        }
-
-        // Scanning
+        // Scanning functions
         function toggleScanning() {
-            isScanning ? stopScanning() : startScanning();
+            if (isScanning) {
+                stopScanning();
+            } else {
+                startScanning();
+            }
         }
 
         function startScanning() {
+            const network = el.networkSelect.value;
+            const baseToken = el.baseTokenSelect.value;
+            const amountUSD = parseFloat(el.inputAmount.value);
+            const minProfitPercent = parseFloat(el.minProfitPercent.value);
+
+            // Validation
+            if (!baseToken) {
+                showError('Please select a base token');
+                return;
+            }
+            if (amountUSD < 100 || amountUSD > 1000000) {
+                showError('Amount must be between $100 and $1,000,000');
+                return;
+            }
+
             isScanning = true;
             el.scanButton.classList.add('scanning');
             el.scanBtnText.textContent = '⏸ Stop Scan';
             el.scanIndicator.classList.add('scanning');
             el.statusMessage.textContent = 'Starting scan...';
-            el.networkSelect.disabled = true;
-            el.inputAmount.disabled = true;
-            el.minProfit.disabled = true;
-            el.liquidityToggle.disabled = true;
             
-            runScan();
-            scanInterval = setInterval(runScan, 15000);
+            // Disable controls
+            [el.networkSelect, el.baseTokenSelect, el.inputAmount, el.minProfitPercent, el.liquidityToggle].forEach(el => {
+                el.disabled = true;
+            });
+
+            // Start the scan via HTTP POST
+            runHttpScan(network, baseToken, amountUSD, minProfitPercent);
         }
 
         function stopScanning() {
@@ -713,118 +281,136 @@
             el.scanBtnText.textContent = '▶ Start Scan';
             el.scanIndicator.classList.remove('scanning');
             el.statusMessage.textContent = 'Scanning stopped';
-            if (scanInterval) clearInterval(scanInterval);
-            el.networkSelect.disabled = false;
-            el.inputAmount.disabled = false;
-            el.minProfit.disabled = false;
-            el.liquidityToggle.disabled = false;
+            
+            // Re-enable controls
+            [el.networkSelect, el.baseTokenSelect, el.inputAmount, el.minProfitPercent, el.liquidityToggle].forEach(el => {
+                el.disabled = false;
+            });
         }
 
-        async function runScan() {
+        async function runHttpScan(network, baseToken, amountUSD, minProfitPercent) {
             hideError();
-            el.statusMessage.textContent = 'Scanning for opportunities...';
             
             try {
                 const res = await axios.post(`${API_URL}/scan`, {
-                    network: el.networkSelect.value,
-                    amount: parseFloat(el.inputAmount.value),
-                    minProfit: parseFloat(el.minProfit.value),
+                    network: network,
+                    baseToken: baseToken,
+                    amountUSD: amountUSD,
+                    minProfitPercent: minProfitPercent,
                     checkLiquidity: checkLiquidity
                 });
                 
                 if (res.data.success) {
-                    // Update scan statistics
-                    el.scannedCount.textContent = res.data.stats?.scannedSoFar?.toLocaleString() || res.data.scanned;
-                    el.profitableCount.textContent = res.data.stats.total;
-                    el.bestProfit.textContent = res.data.stats.bestNetProfit > 0 
-                        ? `+${res.data.stats.bestNetProfit.toFixed(3)}%` 
-                        : '0%';
+                    // Update statistics
+                    el.scannedCount.textContent = res.data.scanStats?.scannedSoFar?.toLocaleString() || res.data.scanned;
+                    el.profitableCount.textContent = res.data.scanStats.opportunitiesFound || 0;
                     
-                    // Update total paths
-                    if (res.data.stats.totalPaths) {
-                        el.totalPaths.textContent = res.data.stats.totalPaths.toLocaleString();
+                    if (res.data.scanStats.bestNetProfit > 0) {
+                        el.bestProfit.textContent = `+${res.data.scanStats.bestNetProfit.toFixed(3)}%`;
                     }
                     
-                    // Update gas cost display with correct native token
+                    // Update total paths
+                    if (res.data.scanStats.totalPaths) {
+                        el.totalPaths.textContent = res.data.scanStats.totalPaths.toLocaleString();
+                    }
+                    
+                    // Update gas cost display
                     if (res.data.gasCost) {
                         el.gasCostCard.style.display = 'block';
-                        
                         const nativeToken = res.data.gasCost.nativeToken || 'ETH';
-                        
-                        el.gasPrice.textContent = `${res.data.gasCost.gasPrice} GWEI`;
+                        el.gasPrice.textContent = `${res.data.gasCost.gasPriceGwei} GWEI`;
                         el.gasCostUSD.textContent = `$${res.data.gasCost.gasCostUSD}`;
                         el.gasCostNative.textContent = `${res.data.gasCost.gasCostNative} ${nativeToken}`;
                         el.nativeTokenLabel.textContent = `${nativeToken} Cost:`;
                     }
                     
-                    updateOpportunities(res.data.opportunities);
+                    // Update opportunities
+                    updateOpportunities(res.data.opportunities || []);
                     
-                    // Update status message with progress
-                    const progress = res.data.stats.percentComplete 
-                        ? ` (${res.data.stats.percentComplete}% complete)` 
-                        : '';
-                    
-                    el.statusMessage.textContent = res.data.stats.total > 0
-                        ? `Found ${res.data.stats.total} profitable opportunities!${progress}`
-                        : `No profitable opportunities found. Continuing scan...${progress}`;
+                    // Update status message
+                    const percentComplete = res.data.scanStats.percentComplete || '0';
+                    el.statusMessage.textContent = res.data.scanStats.opportunitiesFound > 0
+                        ? `Found ${res.data.scanStats.opportunitiesFound} opportunities (${percentComplete}% complete)`
+                        : `No opportunities found (${percentComplete}% complete)`;
+                        
+                    // If scan completed but not all paths scanned, offer to continue
+                    if (parseFloat(percentComplete) < 100) {
+                        setTimeout(() => {
+                            if (isScanning) {
+                                el.statusMessage.textContent = 'Starting next batch...';
+                                setTimeout(() => runHttpScan(network, baseToken, amountUSD, minProfitPercent), 1000);
+                            }
+                        }, 2000);
+                    }
                 }
             } catch (error) {
                 console.error('Scan error:', error);
-                showError(`Scan failed: ${error.message}`);
+                let errorMsg = 'Scan failed';
+                if (error.response?.data?.error) {
+                    errorMsg = error.response.data.error;
+                } else if (error.message) {
+                    errorMsg = error.message;
+                }
+                showError(`Scan failed: ${errorMsg}`);
                 el.statusMessage.textContent = 'Scan failed';
+                stopScanning();
             }
         }
 
         function updateOpportunities(newOpps) {
-            // Merge new opportunities with existing ones
+            // Add new opportunities
             allOpportunities = [...newOpps, ...allOpportunities];
             
-            // Remove duplicates based on path + timestamp
-            const unique = Array.from(
-                new Map(allOpportunities.map(item => [item.path + item.timestamp, item])).values()
-            );
+            // Remove duplicates and keep top 20
+            const seen = new Set();
+            allOpportunities = allOpportunities.filter(opp => {
+                const key = opp.path + opp.timestamp;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            }).sort((a, b) => b.netProfitPercent - a.netProfitPercent).slice(0, 20);
             
-            // Sort by net profit and keep top 20
-            allOpportunities = unique
-                .sort((a, b) => (b.netProfitPercent || b.profitPercent) - (a.netProfitPercent || a.profitPercent))
-                .slice(0, 20);
-            
+            // Update UI
             if (allOpportunities.length > 0) {
                 el.emptyState.classList.add('hidden');
                 el.opportunitiesTable.classList.remove('hidden');
-                el.opportunitiesBody.innerHTML = allOpportunities.map(opp => {
-                    const netProfit = opp.netProfit || opp.profit;
-                    const netProfitPercent = opp.netProfitPercent || opp.profitPercent;
-                    const gasCost = opp.gasCost || 0;
-                    const nativeToken = opp.gasDetails?.nativeToken || 'ETH';
-                    
-                    return `
-                        <tr>
-                            <td class="path-cell">${opp.path}</td>
-                            <td>$${opp.inputAmount.toFixed(2)}</td>
-                            <td>$${opp.outputAmount.toFixed(2)}</td>
-                            <td class="success-text">
-                                +$${netProfit.toFixed(2)}
-                                ${gasCost > 0 ? `<br><span style="font-size: 0.75rem; color: #ef4444;">-$${gasCost.toFixed(2)} gas</span>` : ''}
-                            </td>
-                            <td>
-                                <span class="profit-badge ${netProfitPercent > 1 ? 'high' : 'medium'}">
-                                    +${netProfitPercent.toFixed(3)}%
-                                </span>
-                            </td>
-                            <td style="font-size: 0.75rem; color: #9ca3af;">
-                                ${opp.feesPercent?.map(f => f.toFixed(2)).join('% / ') || 'N/A'}%
-                            </td>
-                            <td style="font-size: 0.875rem; color: #9ca3af;">
-                                ${new Date(opp.timestamp).toLocaleTimeString()}
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+                
+                el.opportunitiesBody.innerHTML = allOpportunities.map(opp => `
+                    <tr>
+                        <td class="path-cell">${opp.path}</td>
+                        <td>${opp.inputAmount?.toFixed(6) || 'N/A'} ${opp.pathArray?.[0] || ''}</td>
+                        <td>${opp.outputAmount?.toFixed(6) || 'N/A'} ${opp.pathArray?.[0] || ''}</td>
+                        <td class="success-text">
+                            $${opp.netProfit?.toFixed(2) || '0.00'}
+                            ${opp.gasCost > 0 ? `<br><small style="color: #ef4444;">-$${opp.gasCost.toFixed(2)} gas</small>` : ''}
+                        </td>
+                        <td>
+                            <span class="profit-badge ${opp.netProfitPercent > 1 ? 'high' : 'medium'}">
+                                +${opp.netProfitPercent?.toFixed(3) || '0.000'}%
+                            </span>
+                        </td>
+                        <td><small style="color: #9ca3af;">${opp.feesPercent?.map(f => f.toFixed(2)).join('% / ') || 'N/A'}%</small></td>
+                        <td><small style="color: #9ca3af;">${new Date(opp.timestamp).toLocaleTimeString()}</small></td>
+                    </tr>
+                `).join('');
+            } else {
+                el.emptyState.classList.remove('hidden');
+                el.opportunitiesTable.classList.add('hidden');
             }
         }
 
-        // Start
+        // Error handling
+        function showError(msg) {
+            el.errorMessage.textContent = msg;
+            el.errorMessage.classList.remove('hidden');
+            setTimeout(hideError, 5000);
+        }
+
+        function hideError() {
+            el.errorMessage.classList.add('hidden');
+        }
+
+        // Initialize the application
         init();
     </script>
 </body>
