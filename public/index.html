@@ -300,49 +300,58 @@
                     checkLiquidity: checkLiquidity
                 });
                 
+                // Replace this entire if(res.data.success) block:
                 if (res.data.success) {
-                    // Update statistics
-                    el.scannedCount.textContent = res.data.scanStats?.scannedSoFar?.toLocaleString() || res.data.scanned;
-                    el.profitableCount.textContent = res.data.scanStats.opportunitiesFound || 0;
-                    
-                    if (res.data.scanStats.bestNetProfit > 0) {
-                        el.bestProfit.textContent = `+${res.data.scanStats.bestNetProfit.toFixed(3)}%`;
-                    }
-                    
-                    // Update total paths
-                    if (res.data.scanStats.totalPaths) {
-                        el.totalPaths.textContent = res.data.scanStats.totalPaths.toLocaleString();
-                    }
-                    
-                    // Update gas cost display
-                    if (res.data.gasCost) {
-                        el.gasCostCard.style.display = 'block';
-                        const nativeToken = res.data.gasCost.nativeToken || 'ETH';
-                        el.gasPrice.textContent = `${res.data.gasCost.gasPriceGwei} GWEI`;
-                        el.gasCostUSD.textContent = `$${res.data.gasCost.gasCostUSD}`;
-                        el.gasCostNative.textContent = `${res.data.gasCost.gasCostNative} ${nativeToken}`;
-                        el.nativeTokenLabel.textContent = `${nativeToken} Cost:`;
-                    }
-                    
-                    // Update opportunities
-                    updateOpportunities(res.data.opportunities || []);
-                    
-                    // Update status message
-                    const percentComplete = res.data.scanStats.percentComplete || '0';
-                    el.statusMessage.textContent = res.data.scanStats.opportunitiesFound > 0
-                        ? `Found ${res.data.scanStats.opportunitiesFound} opportunities (${percentComplete}% complete)`
-                        : `No opportunities found (${percentComplete}% complete)`;
-                        
-                    // If scan completed but not all paths scanned, offer to continue
-                    if (parseFloat(percentComplete) < 100) {
-                        setTimeout(() => {
-                            if (isScanning) {
-                                el.statusMessage.textContent = 'Starting next batch...';
-                                setTimeout(() => runHttpScan(network, baseToken, amountUSD, minProfitPercent), 1000);
-                            }
-                        }, 2000);
-                    }
+                // Update statistics
+                   el.scannedCount.textContent = res.data.scanStats?.scannedSoFar?.toLocaleString() || res.data.scanned;
+                   el.profitableCount.textContent = res.data.scanStats.opportunitiesFound || 0;
+  
+                   if (res.data.scanStats.bestNetProfit > 0) {
+                   el.bestProfit.textContent = `+${res.data.scanStats.bestNetProfit.toFixed(3)}%`;
                 }
+  
+                 // Update total paths
+                if (res.data.scanStats.totalPaths) {
+                   el.totalPaths.textContent = res.data.scanStats.totalPaths.toLocaleString();
+                }
+  
+                // Update gas cost display
+                if (res.data.gasCost) {
+                   el.gasCostCard.style.display = 'block';
+                   const nativeToken = res.data.gasCost.nativeToken || 'ETH';
+                   el.gasPrice.textContent = `${res.data.gasCost.gasPriceGwei} GWEI`;
+                   el.gasCostUSD.textContent = `$${res.data.gasCost.gasCostUSD}`;
+                   el.gasCostNative.textContent = `${res.data.gasCost.gasCostNative} ${nativeToken}`;
+                   el.nativeTokenLabel.textContent = `${nativeToken} Cost:`;
+                 }
+  
+                 updateOpportunities(res.data.opportunities || []);
+  
+                // ✅ CRITICAL: Get percentComplete from the RIGHT location
+                const percentComplete = res.data.scanStats?.percentComplete || "0";
+  
+               // Update status message
+               el.statusMessage.textContent = res.data.scanStats.opportunitiesFound > 0
+                 ? `Found ${res.data.scanStats.opportunitiesFound} opportunities (${percentComplete}% complete)`
+                 : `No opportunities found (${percentComplete}% complete)`;
+    
+              // ✅ CRITICAL: Continue scanning if not complete
+              if (parseFloat(percentComplete) < 100 && isScanning) {
+                 setTimeout(() => {
+                   if (isScanning) {
+                     el.statusMessage.textContent = `Continuing scan... (${percentComplete}% complete)`;
+                     setTimeout(() => runHttpScan(network, baseToken, amountUSD, minProfitPercent), 1000);
+                    }
+                   }, 2000);
+                 } else if (parseFloat(percentComplete) >= 100 && isScanning) {
+    // Auto-reset and restart when 100% complete
+                   setTimeout(() => {
+                     if (isScanning) {
+                       resetTrackingAndContinue();
+                     }
+                   }, 3000);
+                 }
+               }
             } catch (error) {
                 console.error('Scan error:', error);
                 let errorMsg = 'Scan failed';
