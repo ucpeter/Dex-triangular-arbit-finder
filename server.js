@@ -129,13 +129,17 @@ const priceCache = {
   TTL: 30000 // 30 seconds
 };
 
-// Initialize providers
+// Initialize providers - USE THIS CORRECTED CODE
 const providers = {};
 for (const [network, config] of Object.entries(NETWORKS)) {
-  providers[network] = new ethers.JsonRpcProvider(config.rpc, {
-    batchMaxCount: 100,
-    staticNetwork: true
-  });
+  providers[network] = new ethers.JsonRpcProvider(
+    config.rpc,           // First argument: RPC URL
+    undefined,            // Second argument: Network (undefined = auto-detect)
+    {                     // Third argument: Options object
+      batchMaxCount: 100,
+      staticNetwork: true
+    }
+  );
 }
 
 // Helper function to get contract instances
