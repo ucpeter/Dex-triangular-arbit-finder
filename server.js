@@ -160,7 +160,7 @@ async function getTokenPriceUSD(network, tokenSymbol) {
   const cacheKey = `${network}:${tokenSymbol}`;
   const now = Date.now();
   
-  // Return cached price if valid
+  // Return cached price if still valid (30 seconds)
   if (priceCache.data.has(cacheKey)) {
     const cached = priceCache.data.get(cacheKey);
     if (now - cached.timestamp < priceCache.TTL) {
@@ -169,49 +169,137 @@ async function getTokenPriceUSD(network, tokenSymbol) {
   }
   
   try {
-    let price = null;
+    const tokenData = NETWORKS[network].tokens[tokenSymbol];
     
-    // Native token prices (simplified - in production use oracle or DEX price)
-    if (tokenSymbol === NETWORKS[network].wrappedNative || tokenSymbol === NETWORKS[network].nativeToken) {
-      // For native tokens, use fixed prices (should be from oracle in production)
-      price = tokenSymbol.includes('ETH') ? 3200 : 0.4;
-    } 
-    // Stablecoins
-    else if (['USDC', 'USDT', 'DAI', 'FRAX'].includes(tokenSymbol)) {
-      price = 1.0;
+    if (!tokenData) {
+      throw new Error(`Token ${tokenSymbol} not found in ${network}`);
     }
-    // Other tokens - approximate pricing (in production, use Chainlink or similar)
-    else {
-      // Simplified: Use Uniswap pool to get price relative to USDC
-      const usdcToken = NETWORKS[network].tokens['USDC'];
-      const targetToken = NETWORKS[network].tokens[tokenSymbol];
-      
-      if (usdcToken && targetToken) {
-        // Get quote for 1 token to USDC
-        const quoter = getQuoter(network);
-        const oneToken = ethers.parseUnits('1', targetToken.decimals);
+    
+    const quoter = getQuoter(network);
+    
+    // Try to get price against USDC (most liquid stablecoin)
+    const usdcToken = NETWORKS[network].tokens['USDC'];
+    
+    if (tokenSymbol === 'USDC') {
+      // USDC is always $1 (by definition for our scanner)
+      priceCache.data.set(cacheKey, { price: 1.0, timestamp: now, source: 'definition' });
+      return 1.0;
+    }
+    
+    if (!usdcToken) {
+      throw new Error('USDC not available for pricing');
+    }
+    
+    // Method 1: Try token → USDC (direct quote)
+    const oneToken = ethers.parseUnits('1', tokenData.decimals);
+    
+    for (const fee of [100, 500, 3000]) { // Try common fee tiers
+      try {
+        const amountOut = await quoter.quoteExactInputSingle.staticCall(
+          tokenData.address,
+          usdcToken.address,
+          fee,
+          oneToken,
+          0,
+          { timeout: 10000 } // 10 second timeout
+        );
         
-        for (const fee of POOL_FEES) {
-          try {
-            const amountOut = await quoter.quoteExactInputSingle.staticCall(
-              targetToken.address,
+        if (amountOut > 0n) {
+          const price = parseFloat(ethers.formatUnits(amountOut, usdcToken.decimals));
+          if (price > 0) {
+            console.log(`💰 Live price for ${tokenSymbol}: $${price.toFixed(6)} (fee: ${fee/10000}%)`);
+            priceCache.data.set(cacheKey, { price, timestamp: now, source: 'token→USDC' });
+            return price;
+          }
+        }
+      } catch (error) {
+        // Try next fee tier
+        continue;
+      }
+    }
+    
+    // Method 2: Try USDC → token (inverse if direct fails)
+    const oneUSDC = ethers.parseUnits('1', usdcToken.decimals);
+    
+    for (const fee of [100, 500, 3000]) {
+      try {
+        const amountOut = await quoter.quoteExactInputSingle.staticCall(
+          usdcToken.address,
+          tokenData.address,
+          fee,
+          oneUSDC,
+          0,
+          { timeout: 10000 }
+        );
+        
+        if (amountOut > 0n) {
+          const tokensPerUSDC = parseFloat(ethers.formatUnits(amountOut, tokenData.decimals));
+          if (tokensPerUSDC > 0) {
+            const price = 1 / tokensPerUSDC;
+            console.log(`💰 Inverse price for ${tokenSymbol}: $${price.toFixed(6)} (1 USDC = ${tokensPerUSDC} ${tokenSymbol})`);
+            priceCache.data.set(cacheKey, { price, timestamp: now, source: 'USDC→token' });
+            return price;
+          }
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    // Method 3: Try via WETH as intermediate (for tokens without direct USDC pair)
+    if (tokenSymbol !== 'WETH' && tokenSymbol !== NETWORKS[network].wrappedNative) {
+      const wethToken = NETWORKS[network].tokens['WETH'] || NETWORKS[network].tokens[NETWORKS[network].wrappedNative];
+      
+      if (wethToken) {
+        try {
+          // Get token → WETH price
+          const tokenToWeth = await quoter.quoteExactInputSingle.staticCall(
+            tokenData.address,
+            wethToken.address,
+            500, // 0.05% fee
+            oneToken,
+            0,
+            { timeout: 10000 }
+          );
+          
+          if (tokenToWeth > 0n) {
+            // Get WETH → USDC price
+            const oneWETH = ethers.parseUnits('1', wethToken.decimals);
+            const wethToUSDC = await quoter.quoteExactInputSingle.staticCall(
+              wethToken.address,
               usdcToken.address,
-              fee,
-              oneToken,
-              0
+              500,
+              oneWETH,
+              0,
+              { timeout: 10000 }
             );
             
-            const priceInUSDC = parseFloat(ethers.formatUnits(amountOut, usdcToken.decimals));
-            if (priceInUSDC > 0) {
-              price = priceInUSDC;
-              break;
+            if (wethToUSDC > 0n) {
+              const wethPrice = parseFloat(ethers.formatUnits(wethToUSDC, usdcToken.decimals));
+              const tokensPerWETH = parseFloat(ethers.formatUnits(tokenToWeth, wethToken.decimals));
+              const price = wethPrice / tokensPerWETH;
+              
+              console.log(`💰 Indirect price for ${tokenSymbol}: $${price.toFixed(6)} (via WETH)`);
+              priceCache.data.set(cacheKey, { price, timestamp: now, source: 'via WETH' });
+              return price;
             }
-          } catch (e) {
-            continue;
           }
+        } catch (error) {
+          // Continue to error
         }
       }
     }
+    
+    throw new Error(`No liquidity found for ${tokenSymbol}/USDC pair on ${network}`);
+    
+  } catch (error) {
+    console.error(`❌ Price fetch failed for ${tokenSymbol}:`, error.message);
+    
+    // For arbitrage scanner, we MUST fail if we can't get a live price
+    // This prevents false arbitrage opportunities
+    throw new Error(`Cannot determine live price for ${tokenSymbol}. No arbitrage calculation possible.`);
+  }
+}
     
     // Fallback prices for common tokens
     if (!price) {
@@ -251,10 +339,11 @@ async function getTokenPriceUSD(network, tokenSymbol) {
 // Convert USD amount to token amount
 async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
   try {
+    // This will now throw if live price cannot be obtained
     const tokenPrice = await getTokenPriceUSD(network, tokenSymbol);
     
     if (!tokenPrice || tokenPrice <= 0) {
-      throw new Error(`Invalid price for ${tokenSymbol}: ${tokenPrice}`);
+      throw new Error(`Invalid live price for ${tokenSymbol}: $${tokenPrice}`);
     }
     
     const tokenAmount = usdAmount / tokenPrice;
@@ -265,18 +354,21 @@ async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
     }
     
     // Validate amount is reasonable
-    if (tokenAmount <= 0 || tokenAmount > 1000000) { // Max 1M tokens
+    if (tokenAmount <= 0 || tokenAmount > 1000000) {
       throw new Error(`Unrealistic token amount: ${tokenAmount}`);
     }
     
     return {
       tokenAmount,
       tokenPrice,
-      tokenAmountWei: ethers.parseUnits(tokenAmount.toString(), tokenData.decimals)
+      tokenAmountWei: ethers.parseUnits(tokenAmount.toString(), tokenData.decimals),
+      source: 'live_price'
     };
   } catch (error) {
-    console.error(`USD conversion error for ${tokenSymbol}:`, error.message);
-    return null;
+    console.error(`❌ USD conversion failed for ${tokenSymbol}:`, error.message);
+    
+    // For arbitrage, we should fail completely if we can't get live prices
+    throw new Error(`Cannot scan with ${tokenSymbol}: ${error.message}. Try a different token with better liquidity.`);
   }
 }
 
