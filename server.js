@@ -673,8 +673,8 @@ app.post('/scan', async (req, res) => {
     const trackingKey = `${network}:${baseToken}`;
     
     console.log(`   Batch Size: ${batch.length} paths`);
-    console.log(`   Total Scanned So Far: ${pathTracking[network].totalScanned}`);
-    console.log(`   Total Paths Available: ${pathTracking[network].allPaths.length}`);
+    console.log(`   Total Scanned So Far: ${pathTracking[trackingKey]?.totalScanned || 0}`);
+    console.log(`   Total Paths Available: ${pathTracking[trackingKey]?.allPaths?.length || 0}`);
     
     // Step 4: Scan paths
     const opportunities = [];
@@ -718,6 +718,7 @@ app.post('/scan', async (req, res) => {
     
     console.log(`${'='.repeat(70)}\n`);
     
+    // ✅ CORRECT RESPONSE (ONLY ONE res.json()!)
     res.json({
       success: true,
       network: NETWORKS[network].name,
@@ -737,9 +738,11 @@ app.post('/scan', async (req, res) => {
       scanStats: {
         pathsScanned: batch.length,
         opportunitiesFound: opportunities.length,
-        totalScannedSoFar: pathTracking[network].totalScanned,
-        totalPaths: pathTracking[network].allPaths.length,
-        percentComplete: ((pathTracking[network].totalScanned / pathTracking[network].allPaths.length) * 100).toFixed(2)
+        totalScannedSoFar: pathTracking[trackingKey]?.totalScanned || 0,
+        totalPaths: pathTracking[trackingKey]?.allPaths?.length || 0,
+        percentComplete: pathTracking[trackingKey]?.allPaths?.length > 0 
+          ? ((pathTracking[trackingKey].totalScanned / pathTracking[trackingKey].allPaths.length) * 100).toFixed(2)
+          : "0.00"
       },
       opportunities: opportunities.slice(0, 20)
     });
@@ -775,41 +778,21 @@ app.post('/reset-tracking', (req, res) => {
     return res.status(400).json({ error: 'Invalid network' });
   }
   
-  pathTracking[network].scannedPaths.clear();
-  pathTracking[network].currentBatchIndex = 0;
-  pathTracking[network].totalScanned = 0;
-  pathTracking[network].allPaths = []; // Will regenerate on next scan
+  const trackingKey = `${network}:${baseToken}`;
   
-  console.log(`🔄 Reset path tracking for ${network}${baseToken ? ` (${baseToken})` : ''}`);
+  if (pathTracking[trackingKey]) {
+    pathTracking[trackingKey].scannedPaths.clear();
+    pathTracking[trackingKey].currentBatchIndex = 0;
+    pathTracking[trackingKey].totalScanned = 0;
+    pathTracking[trackingKey].allPaths = [];
+  }
   
-  // Replace the ENTIRE res.json() call with this:
-res.json({
-  success: true,
-  network: NETWORKS[network].name,
-  baseToken: baseToken,
-  conversion: {
-    usdAmount: amountUSD,
-    tokenAmount: tokenAmount,
-    tokenPrice: tokenPrice,
-    tokenValueUSD: tokenAmount * tokenPrice
-  },
-  gasCost: {
-    gasPriceGwei: gasCost.gasPriceGwei.toFixed(2),
-    gasCostUSD: gasCost.gasCostUSD.toFixed(2),
-    gasCostNative: gasCost.gasCostNative.toFixed(6),
-    nativeToken: gasCost.nativeToken
-  },
-  scanStats: {
-    pathsScanned: batch.length,
-    opportunitiesFound: opportunities.length,
-    // ✅ CRITICAL FIX: Use the correct tracking key
-    totalScannedSoFar: pathTracking[`${network}:${baseToken}`]?.totalScanned || 0,
-    totalPaths: pathTracking[`${network}:${baseToken}`]?.allPaths?.length || 0,
-    percentComplete: pathTracking[`${network}:${baseToken}`]?.allPaths?.length > 0 
-      ? ((pathTracking[`${network}:${baseToken}`].totalScanned / pathTracking[`${network}:${baseToken}`].allPaths.length) * 100).toFixed(2)
-      : "0.00"
-  },
-  opportunities: opportunities.slice(0, 20)
+  console.log(`🔄 Reset path tracking for ${network}:${baseToken}`);
+  
+  res.json({
+    success: true,
+    message: `Path tracking reset for ${network}:${baseToken}`
+  });
 });
 
 // WebSocket for real-time updates
@@ -826,7 +809,6 @@ io.on('connection', (socket) => {
   socket.on('startScan', async (config) => {
     const { network, baseToken, amountUSD, minProfitPercent = 0.1 } = config;
     
-    // Stop existing scan if any
     if (activeScans.has(socket.id)) {
       activeScans.get(socket.id).stop = true;
     }
@@ -843,7 +825,6 @@ io.on('connection', (socket) => {
       }
       
       try {
-        // Convert USD to tokens
         const conversion = await convertUSDToTokenAmount(network, baseToken, amountUSD);
         if (!conversion) {
           socket.emit('error', { message: `Failed to convert USD to ${baseToken}` });
@@ -851,14 +832,13 @@ io.on('connection', (socket) => {
         }
         
         const gasCost = await calculateGasCost(network);
-        
-        // Get next batch
-        const batch = getNextBatch(network, baseToken, 25); // Smaller batch for real-time
+        const batch = getNextBatch(network, baseToken, 25);
+        const trackingKey = `${network}:${baseToken}`;
         
         if (batch.length === 0) {
           socket.emit('info', { 
             message: 'All paths scanned. Restarting...',
-            totalScanned: pathTracking[network].totalScanned
+            totalScanned: pathTracking[trackingKey]?.totalScanned || 0
           });
           setTimeout(runScan, 2000);
           return;
@@ -872,24 +852,24 @@ io.on('connection', (socket) => {
             socket.emit('opportunity', result);
           }
           
-          // Send progress every 5 paths
           if (i % 5 === 0) {
             socket.emit('progress', {
               scanned: i + 1,
               batchTotal: batch.length,
-              totalScanned: pathTracking[network].totalScanned,
-              totalPaths: pathTracking[network].allPaths.length,
-              percentComplete: ((pathTracking[network].totalScanned / pathTracking[network].allPaths.length) * 100).toFixed(2)
+              totalScanned: pathTracking[trackingKey]?.totalScanned || 0,
+              totalPaths: pathTracking[trackingKey]?.allPaths?.length || 0,
+              percentComplete: pathTracking[trackingKey]?.allPaths?.length > 0 
+                ? ((pathTracking[trackingKey].totalScanned / pathTracking[trackingKey].allPaths.length) * 100).toFixed(2)
+                : "0.00"
             });
           }
           
-          // Small delay to prevent rate limiting
           await new Promise(resolve => setTimeout(resolve, 50));
         }
         
         socket.emit('batchComplete', {
           scanned: batch.length,
-          totalScanned: pathTracking[network].totalScanned
+          totalScanned: pathTracking[trackingKey]?.totalScanned || 0
         });
         
         if (!scanState.stop) {
@@ -950,11 +930,8 @@ server.listen(PORT, () => {
    POST /check-liquidity     - Check pool liquidity
    POST /reset-tracking      - Reset path tracking
 
-🔌 WebSocket: ws://localhost:${PORT}
-   Events: startScan, stopScan, opportunity, progress, error
-
 🌐 Frontend: http://localhost:${PORT}
 
-✅ Ready to scan! Now properly converts USD to token amounts.
+✅ Ready to scan!
   `);
 });
