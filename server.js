@@ -300,41 +300,6 @@ async function getTokenPriceUSD(network, tokenSymbol) {
     throw new Error(`Cannot determine live price for ${tokenSymbol}. No arbitrage calculation possible.`);
   }
 }
-    
-    // Fallback prices for common tokens
-    if (!price) {
-      const fallbackPrices = {
-        'WBTC': 65000,
-        'WETH': 3200,
-        'WMATIC': 0.4,
-        'ARB': 0.1,
-        'LINK': 15,
-        'UNI': 6,
-        'AAVE': 100,
-        'CRV': 0.5,
-        'SNX': 3,
-        'COMP': 50,
-        'GMX': 40,
-        'MAGIC': 0.7,
-        'SUSHI': 1.2,
-        'FXS': 6,
-        'LDO': 2.5,
-        'PEPE': 0.000001,
-        'RNDR': 8
-      };
-      
-      price = fallbackPrices[tokenSymbol] || 1.0;
-    }
-    
-    // Update cache
-    priceCache.data.set(cacheKey, { price, timestamp: now });
-    
-    return price;
-  } catch (error) {
-    console.log(`Price fetch error for ${tokenSymbol}:`, error.message);
-    return 1.0; // Safe fallback
-  }
-}
 
 // Convert USD amount to token amount
 async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
