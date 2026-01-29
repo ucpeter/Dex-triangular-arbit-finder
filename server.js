@@ -703,6 +703,7 @@ app.post('/scan', async (req, res) => {
     console.log(`Base Token: ${baseToken}`);
     console.log(`USD Amount: $${amountUSD}`);
     console.log(`Min Profit: ${minProfitPercent}%`);
+    console.log(`Liquidity Check: ${checkLiquidity ? 'Enabled ✓' : 'Disabled ✗'}`);
     console.log(`${'='.repeat(70)}`);
     
     // Step 1: Convert USD to token amount
@@ -736,6 +737,7 @@ app.post('/scan', async (req, res) => {
     // Step 4: Scan paths
     const opportunities = [];
     console.log('\n🔍 Scanning for arbitrage opportunities...');
+    console.log(`   Liquidity Check: ${checkLiquidity ? 'Active' : 'Skipped'}`);
     
     for (let i = 0; i < batch.length; i++) {
       const path = batch[i];
