@@ -255,7 +255,6 @@ function validateTokenPrice(tokenSymbol, price) {
 // Convert USD amount to token amount
 async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
   try {
-    // This will now throw if live price cannot be obtained
     const tokenPrice = await getTokenPriceUSD(network, tokenSymbol);
     
     if (!tokenPrice || tokenPrice <= 0) {
@@ -274,19 +273,20 @@ async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
       throw new Error(`Unrealistic token amount: ${tokenAmount}`);
     }
     
+    // ✅ THIS IS THE FIX - JUST THESE 3 LINES:
+    const decimals = tokenData.decimals;
+    const units = Math.floor(tokenAmount * (10 ** decimals));
+    const unitsBigInt = BigInt(units);
+    
     return {
       tokenAmount,
       tokenPrice,
-      // Convert without using Math.round (which can create scientific notation)
-      const units = BigInt(Math.floor(tokenAmount * (10 ** tokenData.decimals)));
-      tokenAmountWei: units.toString(),
+      tokenAmountWei: unitsBigInt.toString(),
       source: 'live_price'
     };
   } catch (error) {
     console.error(`❌ USD conversion failed for ${tokenSymbol}:`, error.message);
-    
-    // For arbitrage, we should fail completely if we can't get live prices
-    throw new Error(`Cannot scan with ${tokenSymbol}: ${error.message}. Try a different token with better liquidity.`);
+    throw new Error(`Cannot scan with ${tokenSymbol}: ${error.message}`);
   }
 }
 
