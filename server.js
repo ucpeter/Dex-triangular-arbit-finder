@@ -170,30 +170,22 @@ async function getTokenPriceUSD(network, tokenSymbol) {
   
   try {
     const tokenData = NETWORKS[network].tokens[tokenSymbol];
-    
-    if (!tokenData) {
-      throw new Error(`Token ${tokenSymbol} not found in ${network}`);
-    }
-    
-    const quoter = getQuoter(network);
-    
-    // Try to get price against USDC (most liquid stablecoin)
     const usdcToken = NETWORKS[network].tokens['USDC'];
     
+    if (!tokenData || !usdcToken) {
+      throw new Error('Token or USDC not found');
+    }
+    
+    // Special case: USDC is $1
     if (tokenSymbol === 'USDC') {
-      // USDC is always $1 (by definition for our scanner)
-      priceCache.data.set(cacheKey, { price: 1.0, timestamp: now, source: 'definition' });
+      priceCache.data.set(cacheKey, { price: 1.0, timestamp: now });
       return 1.0;
     }
     
-    if (!usdcToken) {
-      throw new Error('USDC not available for pricing');
-    }
-    
-    // Method 1: Try token → USDC (direct quote)
+    const quoter = getQuoter(network);
     const oneToken = ethers.parseUnits('1', tokenData.decimals);
     
-    for (const fee of [100, 500, 3000]) { // Try common fee tiers
+    for (const fee of [100, 500, 3000]) {
       try {
         const amountOut = await quoter.quoteExactInputSingle.staticCall(
           tokenData.address,
@@ -201,44 +193,23 @@ async function getTokenPriceUSD(network, tokenSymbol) {
           fee,
           oneToken,
           0,
-          { timeout: 10000 } // 10 second timeout
-        );
-        
-        if (amountOut > 0n) {
-          const price = parseFloat(ethers.formatUnits(amountOut, usdcToken.decimals));
-          if (price > 0) {
-            console.log(`💰 Live price for ${tokenSymbol}: $${price.toFixed(6)} (fee: ${fee/10000}%)`);
-            priceCache.data.set(cacheKey, { price, timestamp: now, source: 'token→USDC' });
-            return price;
-          }
-        }
-      } catch (error) {
-        // Try next fee tier
-        continue;
-      }
-    }
-    
-    // Method 2: Try USDC → token (inverse if direct fails)
-    const oneUSDC = ethers.parseUnits('1', usdcToken.decimals);
-    
-    for (const fee of [100, 500, 3000]) {
-      try {
-        const amountOut = await quoter.quoteExactInputSingle.staticCall(
-          usdcToken.address,
-          tokenData.address,
-          fee,
-          oneUSDC,
-          0,
           { timeout: 10000 }
         );
         
-        if (amountOut > 0n) {
-          const tokensPerUSDC = parseFloat(ethers.formatUnits(amountOut, tokenData.decimals));
-          if (tokensPerUSDC > 0) {
-            const price = 1 / tokensPerUSDC;
-            console.log(`💰 Inverse price for ${tokenSymbol}: $${price.toFixed(6)} (1 USDC = ${tokensPerUSDC} ${tokenSymbol})`);
-            priceCache.data.set(cacheKey, { price, timestamp: now, source: 'USDC→token' });
+        const price = parseFloat(ethers.formatUnits(amountOut, usdcToken.decimals));
+        
+        // ✅ ADD VALIDATION: Price must be reasonable
+        if (price > 0) {
+          // Check if price is realistic for this token
+          const isRealistic = validateTokenPrice(tokenSymbol, price);
+          
+          if (isRealistic) {
+            console.log(`✅ Valid price for ${tokenSymbol}: $${price.toFixed(6)} (fee: ${fee/10000}%)`);
+            priceCache.data.set(cacheKey, { price, timestamp: now });
             return price;
+          } else {
+            console.log(`⚠️  Suspicious price for ${tokenSymbol}: $${price.toFixed(6)} - skipping`);
+            continue;
           }
         }
       } catch (error) {
@@ -246,59 +217,39 @@ async function getTokenPriceUSD(network, tokenSymbol) {
       }
     }
     
-    // Method 3: Try via WETH as intermediate (for tokens without direct USDC pair)
-    if (tokenSymbol !== 'WETH' && tokenSymbol !== NETWORKS[network].wrappedNative) {
-      const wethToken = NETWORKS[network].tokens['WETH'] || NETWORKS[network].tokens[NETWORKS[network].wrappedNative];
-      
-      if (wethToken) {
-        try {
-          // Get token → WETH price
-          const tokenToWeth = await quoter.quoteExactInputSingle.staticCall(
-            tokenData.address,
-            wethToken.address,
-            500, // 0.05% fee
-            oneToken,
-            0,
-            { timeout: 10000 }
-          );
-          
-          if (tokenToWeth > 0n) {
-            // Get WETH → USDC price
-            const oneWETH = ethers.parseUnits('1', wethToken.decimals);
-            const wethToUSDC = await quoter.quoteExactInputSingle.staticCall(
-              wethToken.address,
-              usdcToken.address,
-              500,
-              oneWETH,
-              0,
-              { timeout: 10000 }
-            );
-            
-            if (wethToUSDC > 0n) {
-              const wethPrice = parseFloat(ethers.formatUnits(wethToUSDC, usdcToken.decimals));
-              const tokensPerWETH = parseFloat(ethers.formatUnits(tokenToWeth, wethToken.decimals));
-              const price = wethPrice / tokensPerWETH;
-              
-              console.log(`💰 Indirect price for ${tokenSymbol}: $${price.toFixed(6)} (via WETH)`);
-              priceCache.data.set(cacheKey, { price, timestamp: now, source: 'via WETH' });
-              return price;
-            }
-          }
-        } catch (error) {
-          // Continue to error
-        }
-      }
-    }
-    
-    throw new Error(`No liquidity found for ${tokenSymbol}/USDC pair on ${network}`);
+    throw new Error(`No valid price found for ${tokenSymbol}`);
     
   } catch (error) {
     console.error(`❌ Price fetch failed for ${tokenSymbol}:`, error.message);
-    
-    // For arbitrage scanner, we MUST fail if we can't get a live price
-    // This prevents false arbitrage opportunities
-    throw new Error(`Cannot determine live price for ${tokenSymbol}. No arbitrage calculation possible.`);
+    throw error;
   }
+}
+
+// Add this validation function
+function validateTokenPrice(tokenSymbol, price) {
+  // Known reasonable price ranges (wide bounds)
+  const expectedRanges = {
+    'WETH': { min: 500, max: 5000 },      // $500-$5000
+    'WMATIC': { min: 0.1, max: 2 },       // $0.10-$2.00
+    'LINK': { min: 5, max: 50 },          // $5-$50
+    'DAI': { min: 0.99, max: 1.01 },      // $0.99-$1.01
+    'USDT': { min: 0.99, max: 1.01 },     // $0.99-$1.01
+    'WBTC': { min: 10000, max: 100000 },  // $10k-$100k
+    'ARB': { min: 0.05, max: 5 },         // $0.05-$5
+    'UNI': { min: 1, max: 20 },           // $1-$20
+    'AAVE': { min: 50, max: 500 },        // $50-$500
+    'CRV': { min: 0.1, max: 5 },          // $0.10-$5
+    'SNX': { min: 1, max: 10 },           // $1-$10
+    'COMP': { min: 20, max: 200 },        // $20-$200
+  };
+  
+  const range = expectedRanges[tokenSymbol];
+  if (!range) {
+    // Unknown token - accept any positive price
+    return price > 0;
+  }
+  
+  return price >= range.min && price <= range.max;
 }
 
 // Convert USD amount to token amount
