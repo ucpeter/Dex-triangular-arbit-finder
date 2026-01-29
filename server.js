@@ -277,7 +277,9 @@ async function convertUSDToTokenAmount(network, tokenSymbol, usdAmount) {
     return {
       tokenAmount,
       tokenPrice,
-      tokenAmountWei: ethers.parseUnits(Math.round(tokenAmount * (10 ** tokenData.decimals)).toString(), 0),
+      // Convert without using Math.round (which can create scientific notation)
+      const units = BigInt(Math.floor(tokenAmount * (10 ** tokenData.decimals)));
+      tokenAmountWei: units.toString(),
       source: 'live_price'
     };
   } catch (error) {
