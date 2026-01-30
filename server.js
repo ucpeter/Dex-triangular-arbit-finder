@@ -386,7 +386,8 @@ async function getQuote(network, tokenIn, tokenOut, amountInTokens, fee, checkLi
     const tokenOutData = NETWORKS[network].tokens[tokenOut];
     
     if (!tokenInData || !tokenOutData) {
-      throw new Error(`Token not found: ${tokenIn} or ${tokenOut}`);
+      console.log(`   getQuote: Token not found (${tokenIn} or ${tokenOut})`);
+      return null;
     }
     
     if (checkLiquidity) {
@@ -397,6 +398,9 @@ async function getQuote(network, tokenIn, tokenOut, amountInTokens, fee, checkLi
     }
     
     const quoter = getQuoter(network);
+    
+    // ✅ FIX: amountInTokens is already in TOKEN units (not wei)
+    // We need to convert it to wei based on tokenIn's decimals
     const amountInWei = ethers.parseUnits(amountInTokens.toString(), tokenInData.decimals);
     
     // Validate amount is reasonable
@@ -416,12 +420,16 @@ async function getQuote(network, tokenIn, tokenOut, amountInTokens, fee, checkLi
       return null;
     }
     
+    // ✅ FIX: Convert output to tokenOut units (not wei)
     const amountOutTokens = parseFloat(ethers.formatUnits(amountOut, tokenOutData.decimals));
+    
+    // Debug logging
+    console.log(`   Quote: ${amountInTokens.toFixed(6)} ${tokenIn} → ${amountOutTokens.toFixed(6)} ${tokenOut} (fee: ${fee/10000}%)`);
+    
     return amountOutTokens;
   } catch (error) {
-    // Don't log expected errors (no liquidity, etc.)
     if (!error.message.includes('revert') && !error.message.includes('insufficient liquidity')) {
-      console.log(`Quote error ${tokenIn}->${tokenOut} fee ${fee}:`, error.message);
+      console.log(`   Quote error ${tokenIn}->${tokenOut}: ${error.message}`);
     }
     return null;
   }
@@ -532,6 +540,8 @@ function getNextBatch(network, baseToken, batchSize = 50) {
 
 async function calculateArbitrage(network, path, amountTokens, gasCost, minProfitPercent = 0) {
   const [tokenA, tokenB, tokenC] = path;
+
+  console.log(`\n   🧮 Calculating: ${tokenA}(${amountTokens}) → ${tokenB} → ${tokenC} → ${tokenA}`);
   
   // ✅ FIX: Get price BEFORE swaps (consistent timing)
   const tokenPrice = await getTokenPriceUSD(network, tokenA);
@@ -550,28 +560,24 @@ async function calculateArbitrage(network, path, amountTokens, gasCost, minProfi
   
   for (const fee1 of FEES_TO_CHECK) {
     const amountB = await getQuote(network, tokenA, tokenB, amountTokens, fee1, true);
+    console.log(`     ${tokenA}→${tokenB}: ${amountTokens.toFixed(6)} → ${amountB ? amountB.toFixed(6) : 'FAILED'}`);
     if (!amountB) continue;
     
     for (const fee2 of FEES_TO_CHECK) {
       const amountC = await getQuote(network, tokenB, tokenC, amountB, fee2, true);
+      console.log(`     ${tokenB}→${tokenC}: ${amountB.toFixed(6)} → ${amountC ? amountC.toFixed(6) : 'FAILED'}`);
       if (!amountC) continue;
       
       for (const fee3 of FEES_TO_CHECK) {
         const amountFinal = await getQuote(network, tokenC, tokenA, amountC, fee3, true);
+        console.log(`     ${tokenC}→${tokenA}: ${amountC.toFixed(6)} → ${amountFinal ? amountFinal.toFixed(6) : 'FAILED'}`);
         if (!amountFinal) continue;
         
-        const profitTokens = amountFinal - amountTokens;
-        const profitPercent = (profitTokens / amountTokens) * 100;
-        
-        if (profitPercent > bestProfit && profitPercent >= minProfitPercent) {
-          bestProfit = profitPercent;
+        const profitPercent = ((amountFinal - amountTokens) / amountTokens) * 100;
+        console.log(`     Profit: ${profitPercent.toFixed(10)}%`);
           
-          // ✅ Now tokenPrice is consistent (fetched before swaps)
-          const profitUSD = profitTokens * tokenPrice;
-          const netProfitUSD = profitUSD - (gasCost?.gasCostUSD || 0);
-          
-          if (netProfitUSD > 0) {
-            bestResult = {
+        if (netProfitUSD > 0) {
+        bestResult = {
               path: `${tokenA} → ${tokenB} → ${tokenC} → ${tokenA}`,
               inputAmount: amountTokens,
               outputAmount: amountFinal,
