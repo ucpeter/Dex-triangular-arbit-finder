@@ -540,8 +540,6 @@ function getNextBatch(network, baseToken, batchSize = 50) {
 
 async function calculateArbitrage(network, path, amountTokens, gasCost, minProfitPercent = 0) {
   const [tokenA, tokenB, tokenC] = path;
-
-  console.log(`\n   🧮 Calculating: ${tokenA}(${amountTokens}) → ${tokenB} → ${tokenC} → ${tokenA}`);
   
   // ✅ FIX: Get price BEFORE swaps (consistent timing)
   const tokenPrice = await getTokenPriceUSD(network, tokenA);
@@ -560,23 +558,27 @@ async function calculateArbitrage(network, path, amountTokens, gasCost, minProfi
   
   for (const fee1 of FEES_TO_CHECK) {
     const amountB = await getQuote(network, tokenA, tokenB, amountTokens, fee1, true);
-    console.log(`     ${tokenA}→${tokenB}: ${amountTokens.toFixed(6)} → ${amountB ? amountB.toFixed(6) : 'FAILED'}`);
     if (!amountB) continue;
     
     for (const fee2 of FEES_TO_CHECK) {
       const amountC = await getQuote(network, tokenB, tokenC, amountB, fee2, true);
-      console.log(`     ${tokenB}→${tokenC}: ${amountB.toFixed(6)} → ${amountC ? amountC.toFixed(6) : 'FAILED'}`);
       if (!amountC) continue;
       
       for (const fee3 of FEES_TO_CHECK) {
         const amountFinal = await getQuote(network, tokenC, tokenA, amountC, fee3, true);
-        console.log(`     ${tokenC}→${tokenA}: ${amountC.toFixed(6)} → ${amountFinal ? amountFinal.toFixed(6) : 'FAILED'}`);
         if (!amountFinal) continue;
         
-        const profitPercent = ((amountFinal - amountTokens) / amountTokens) * 100;
-        console.log(`     Profit: ${profitPercent.toFixed(10)}%`);
+        const profitTokens = amountFinal - amountTokens;
+        const profitPercent = (profitTokens / amountTokens) * 100;
+        
+        if (profitPercent > bestProfit && profitPercent >= minProfitPercent) {
+          bestProfit = profitPercent;
           
-       if (netProfitUSD > 0) {
+          // ✅ Now tokenPrice is consistent (fetched before swaps)
+          const profitUSD = profitTokens * tokenPrice;
+          const netProfitUSD = profitUSD - (gasCost?.gasCostUSD || 0);
+          
+          if (netProfitUSD > 0) {
             bestResult = {
               path: `${tokenA} → ${tokenB} → ${tokenC} → ${tokenA}`,
               inputAmount: amountTokens,
