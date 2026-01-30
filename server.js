@@ -576,8 +576,8 @@ async function calculateArbitrage(network, path, amountTokens, gasCost, minProfi
         const profitPercent = ((amountFinal - amountTokens) / amountTokens) * 100;
         console.log(`     Profit: ${profitPercent.toFixed(10)}%`);
           
-        if (netProfitUSD > 0) {
-        bestResult = {
+       if (netProfitUSD > 0) {
+            bestResult = {
               path: `${tokenA} → ${tokenB} → ${tokenC} → ${tokenA}`,
               inputAmount: amountTokens,
               outputAmount: amountFinal,
